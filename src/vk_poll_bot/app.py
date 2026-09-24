@@ -50,6 +50,8 @@ async def run(base_dir: Path, *, check: bool = False) -> None:
             logger.warning(
                 "VK_PEER_ID=0: отправьте /where в тестовом чате и запишите peer_id в .env"
             )
+        else:
+            await service.restore_active_poll()
         if settings.enable_scheduler:
             await scheduler.start()
         else:

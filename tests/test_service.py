@@ -21,9 +21,11 @@ def test_create_poll_and_prevent_duplicate(tmp_path) -> None:
         assert await bot.create_poll("2026-09-24") is False
         assert bot.poll["poll_date"] == "2026-09-24"
         assert api.pinned == [(2_000_000_001, 101, 0)]
+        assert api.unpinned == [2_000_000_001]
         keyboard = json.loads(api.sent[0][2])
         assert keyboard["buttons"][0][0]["action"]["label"] == "✅ ИДУ"
-        assert "Получить статистику: /status" in api.sent[0][1]
+        assert "Антон" not in api.sent[0][1]
+        assert "Гость: +1 ФИО" not in api.sent[0][1]
         chat_messages = [message for message in api.sent if message[0] == 2_000_000_001]
         assert len(chat_messages) == 2
         assert chat_messages[1][1].startswith("Я создал опрос — проголосуйте.")
@@ -32,7 +34,24 @@ def test_create_poll_and_prevent_duplicate(tmp_path) -> None:
     asyncio.run(scenario())
 
 
-def test_vote_event_changes_existing_vote(tmp_path) -> None:
+def test_restore_active_poll_refreshes_and_replaces_pin(tmp_path) -> None:
+    async def scenario():
+        bot, api = make_service(tmp_path)
+        await bot.create_poll("2026-09-24")
+        api.edited.clear()
+        api.pinned.clear()
+        api.unpinned.clear()
+
+        await bot.restore_active_poll()
+
+        assert api.edited[-1][2] == 0
+        assert api.unpinned == [2_000_000_001]
+        assert api.pinned == [(2_000_000_001, 101, 0)]
+
+    asyncio.run(scenario())
+
+
+def test_vote_must_be_cancelled_before_voting_again(tmp_path) -> None:
     async def scenario():
         bot, api = make_service(tmp_path)
         api.names[20] = "Иван Иванов"
@@ -56,9 +75,17 @@ def test_vote_event_changes_existing_vote(tmp_path) -> None:
 
         await vote("yes")
         await vote("no")
+        assert bot.poll["voters"]["20"] == {"name": "Иван Иванов", "choice": "yes"}
+        assert "сначала нажмите «Отменить голос»" in api.answers[-1][-1]
+
+        await vote("cancel")
+        assert "20" not in bot.poll["voters"]
+        assert "Голос отменён" in api.answers[-1][-1]
+
+        await vote("no")
         assert bot.poll["voters"]["20"] == {"name": "Иван Иванов", "choice": "no"}
         assert "Ваш голос: Нет" in api.answers[-1][-1]
-        assert "Не идут (1)" in api.edited[-1][3]
+        assert "Не идут: 1" in api.edited[-1][3]
 
     asyncio.run(scenario())
 
@@ -96,8 +123,43 @@ def test_admin_can_start_and_close_poll(tmp_path) -> None:
             {"object": {"message": {"peer_id": 2_000_000_001, "from_id": 10, "text": "/close"}}}
         )
         assert bot.poll is None
-        assert api.unpinned == [2_000_000_001]
+        assert api.unpinned == [2_000_000_001, 2_000_000_001]
         assert "Голосование закрыто" in api.sent[-1][1]
+
+    asyncio.run(scenario())
+
+
+def test_status_matches_telegram_detailed_format(tmp_path) -> None:
+    async def scenario():
+        bot, api = make_service(tmp_path)
+        api.names[20] = "Антон Гагиев"
+        await bot.create_poll("2026-09-24")
+        bot.poll["voters"]["20"] = {"name": "Антон Гагиев", "choice": "yes"}
+        bot.poll["manual_yes_voters"]["manual:1"] = {
+            "label": "Клим",
+            "added_by_user_id": 10,
+            "added_by_name": "Админ",
+            "added_at": "2026-09-24T12:00:00+03:00",
+        }
+
+        await bot.handle_message_event(
+            {
+                "object": {
+                    "message": {
+                        "peer_id": 2_000_000_001,
+                        "from_id": 20,
+                        "text": "/status",
+                    }
+                }
+            }
+        )
+
+        assert api.sent[-1][1] == (
+            "«ДА»: 1 + 1 вручную = 2 / 3\n"
+            "«Нет»: 0\n\n"
+            "Реальные «ДА»:\n1. Антон Гагиев\n\n"
+            "Виртуальные +1:\n1. Клим"
+        )
 
     asyncio.run(scenario())
 

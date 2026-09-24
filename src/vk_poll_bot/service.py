@@ -16,6 +16,7 @@ from .votes import (
     format_status,
     parse_plus_one,
     remove_manual_vote,
+    remove_vote,
     set_vote,
 )
 
@@ -100,21 +101,10 @@ class PollService:
         except (KeyError, TypeError, ValueError):
             date_text = str(poll.get("poll_date", ""))
         result = counts(poll)
-        yes_names = [
-            voter["name"]
-            for voter in poll.get("voters", {}).values()
-            if voter.get("choice") == "yes"
-        ]
-        no_names = [
-            voter["name"]
-            for voter in poll.get("voters", {}).values()
-            if voter.get("choice") == "no"
-        ]
-        guest_names = [vote["label"] for vote in poll.get("manual_yes_voters", {}).values()]
         roster = [
-            f"✅ Идут ({result.yes}): {', '.join(yes_names) or '—'}",
-            f"➕ Гости ({result.manual_yes}): {', '.join(guest_names) or '—'}",
-            f"❌ Не идут ({result.no}): {', '.join(no_names) or '—'}",
+            f"✅ Идут: {result.yes}",
+            f"➕ Приглашённые: {result.manual_yes}",
+            f"❌ Не идут: {result.no}",
         ]
         if result.total_yes >= self.settings.yes_threshold:
             progress = f"🔥 Команда собрана: {result.total_yes} / {self.settings.yes_threshold}"
@@ -126,11 +116,33 @@ class PollService:
             )
         if poll.get("is_open"):
             heading = f"⚽ {poll['question']}"
-            footer = "Гость: +1 ФИО  ·  Получить статистику: /status"
         else:
             heading = "🏁 Голосование завершено"
-            footer = "Итоговый состав сохранён."
-        return "\n".join([heading, f"📅 {date_text}", "", *roster, "", progress, "", footer])
+        return "\n".join([heading, f"📅 {date_text}", "", *roster, "", progress])
+
+    async def _replace_pinned_message(
+        self, *, message_id: int = 0, conversation_message_id: int = 0
+    ) -> None:
+        if not (message_id or conversation_message_id):
+            return
+        try:
+            await self.api.unpin_message(self.settings.peer_id)
+        except Exception as error:
+            self.logger.warning("Не удалось открепить предыдущее сообщение: %s", error)
+        try:
+            await self.api.pin_message(
+                self.settings.peer_id,
+                message_id=message_id,
+                conversation_message_id=0 if message_id else conversation_message_id,
+            )
+        except Exception as error:
+            self.logger.warning("Не удалось закрепить новый опрос: %s", error)
+        else:
+            self.logger.info(
+                "Новый опрос закреплён: message_id=%s, cmid=%s",
+                message_id,
+                conversation_message_id,
+            )
 
     async def _send(self, peer_id: int, text: str):
         return await self.api.send_message(peer_id, text)
@@ -164,6 +176,19 @@ class PollService:
             conversation_message_id=conversation_message_id,
         )
 
+    async def restore_active_poll(self) -> None:
+        poll = self.poll
+        if not poll or not poll.get("is_open"):
+            return
+        try:
+            await self._refresh_poll_message(poll)
+        except Exception as error:
+            self.logger.warning("Не удалось восстановить карточку активного опроса: %s", error)
+        await self._replace_pinned_message(
+            message_id=int(poll.get("message_id", 0)),
+            conversation_message_id=int(poll.get("conversation_message_id", 0)),
+        )
+
     async def create_poll(self, poll_date: str | None = None, force: bool = False) -> bool:
         if self.settings.peer_id <= 0:
             raise RuntimeError("VK_PEER_ID не настроен; отправьте /where в тестовом чате")
@@ -195,17 +220,10 @@ class PollService:
             self.state["current_poll"] = poll
             self.save()
             if sent_message.message_id or sent_message.conversation_message_id:
-                try:
-                    pin_message_id = sent_message.message_id
-                    await self.api.pin_message(
-                        self.settings.peer_id,
-                        message_id=pin_message_id,
-                        conversation_message_id=(
-                            0 if pin_message_id else sent_message.conversation_message_id
-                        ),
-                    )
-                except Exception as error:
-                    self.logger.warning("Опрос создан, но не закреплён: %s", error)
+                await self._replace_pinned_message(
+                    message_id=sent_message.message_id,
+                    conversation_message_id=sent_message.conversation_message_id,
+                )
             else:
                 self.logger.info("VK пока не вернул ID опроса; ожидаю событие message_reply")
             try:
@@ -243,21 +261,36 @@ class PollService:
                 answer = "Голосование уже закрыто"
             elif payload.get("poll_date") != poll.get("poll_date"):
                 answer = "Этот опрос уже неактуален"
-            elif payload.get("choice") not in {"yes", "no"}:
+            elif payload.get("choice") not in {"yes", "no", "cancel"}:
                 answer = "Неизвестный вариант ответа"
             else:
                 choice = payload["choice"]
                 if not poll.get("conversation_message_id"):
                     poll["conversation_message_id"] = int(obj.get("conversation_message_id", 0))
                 name = await self.api.user_name(user_id)
-                previous = set_vote(poll, user_id, name, choice)
-                await self._send_threshold_events(poll)
-                self.save()
-                await self._refresh_poll_message(poll)
-                labels = {"yes": "ДА", "no": "Нет"}
-                answer = f"Ваш голос: {labels[choice]}"
-                if previous == choice:
-                    answer = f"Голос уже учтён: {labels[choice]}"
+                previous = poll.setdefault("voters", {}).get(str(user_id))
+                if choice == "cancel":
+                    removed = remove_vote(poll, user_id)
+                    if removed is None:
+                        answer = "У вас пока нет голоса"
+                    else:
+                        await self._send_threshold_events(poll)
+                        self.save()
+                        await self._refresh_poll_message(poll)
+                        answer = "Голос отменён. Теперь можно проголосовать заново"
+                elif previous is not None:
+                    labels = {"yes": "ДА", "no": "Нет"}
+                    answer = (
+                        f"Ваш голос уже учтён: {labels[previous['choice']]}. "
+                        "Для изменения сначала нажмите «Отменить голос»"
+                    )
+                else:
+                    set_vote(poll, user_id, name, choice)
+                    await self._send_threshold_events(poll)
+                    self.save()
+                    await self._refresh_poll_message(poll)
+                    labels = {"yes": "ДА", "no": "Нет"}
+                    answer = f"Ваш голос: {labels[choice]}. Для изменения нажмите «Отменить голос»"
         if event_id and user_id and peer_id:
             try:
                 await self.api.answer_event(event_id, user_id, peer_id, answer)
@@ -277,23 +310,10 @@ class PollService:
         poll["message_id"] = int(message.get("id", 0))
         poll["conversation_message_id"] = int(message.get("conversation_message_id", 0))
         self.save()
-        try:
-            message_id = int(poll.get("message_id", 0))
-            await self.api.pin_message(
-                self.settings.peer_id,
-                message_id=message_id,
-                conversation_message_id=(
-                    0 if message_id else int(poll.get("conversation_message_id", 0))
-                ),
-            )
-        except Exception as error:
-            self.logger.warning("Не удалось закрепить опрос после подтверждения VK: %s", error)
-        else:
-            self.logger.info(
-                "Опрос закреплён после message_reply: message_id=%s, cmid=%s",
-                poll.get("message_id"),
-                poll.get("conversation_message_id"),
-            )
+        await self._replace_pinned_message(
+            message_id=int(poll.get("message_id", 0)),
+            conversation_message_id=int(poll.get("conversation_message_id", 0)),
+        )
 
     async def add_guest(self, label: str, user_id: int, user_name: str) -> None:
         async with self.lock:
@@ -484,7 +504,13 @@ class PollService:
             )
             return
         if command == "/status":
-            await self._send(peer_id, self.render_poll())
+            if self.poll is None:
+                await self._send(peer_id, "Активного опроса нет.")
+            else:
+                await self._send(
+                    peer_id,
+                    format_status(self.poll, self.settings.yes_threshold, detailed=True),
+                )
             return
         if command == "/poll" and self.is_admin(user_id):
             created = await self.create_poll(force=False)

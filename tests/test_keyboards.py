@@ -12,6 +12,8 @@ def test_poll_keyboard_contains_two_callback_buttons() -> None:
         "❌ НЕ ИДУ",
     ]
     assert decode_payload(keyboard["buttons"][0][0]["action"]["payload"])["choice"] == "yes"
+    assert keyboard["buttons"][1][0]["action"]["label"] == "↩ ОТМЕНИТЬ ГОЛОС"
+    assert decode_payload(keyboard["buttons"][1][0]["action"]["payload"])["choice"] == "cancel"
 
 
 def test_disabled_keyboard_has_no_buttons() -> None:

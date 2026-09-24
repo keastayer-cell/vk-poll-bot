@@ -1,5 +1,12 @@
 from vk_poll_bot.models import new_poll_state
-from vk_poll_bot.votes import counts, evaluate_threshold, format_status, parse_plus_one, set_vote
+from vk_poll_bot.votes import (
+    counts,
+    evaluate_threshold,
+    format_status,
+    parse_plus_one,
+    remove_vote,
+    set_vote,
+)
 
 
 def test_vote_can_be_changed() -> None:
@@ -18,7 +25,17 @@ def test_manual_votes_are_included_in_total() -> None:
     set_vote(state, 10, "Антон", "yes")
     state["manual_yes_voters"]["manual:1"] = "Иван"
 
-    assert format_status(state, 10) == "ДА: 1 + 1 приглашённых = 2 / 10\nНет: 0"
+    assert format_status(state, 10) == "«ДА»: 1 + 1 вручную = 2 / 10\n«Нет»: 0"
+
+
+def test_cancel_yes_vote_keeps_name_for_quorum_notification() -> None:
+    state = new_poll_state("2026-09-24", "Идете?")
+    set_vote(state, 10, "Антон", "yes")
+
+    removed = remove_vote(state, 10)
+
+    assert removed == {"name": "Антон", "choice": "yes"}
+    assert state["last_removed_yes_label"] == "Антон"
 
 
 def test_threshold_and_quorum_loss_notifications() -> None:

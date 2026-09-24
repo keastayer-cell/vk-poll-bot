@@ -36,6 +36,13 @@ def set_vote(state: dict, user_id: int, name: str, choice: Choice) -> str | None
     return previous.get("choice") if previous else None
 
 
+def remove_vote(state: dict, user_id: int) -> dict | None:
+    previous = state.setdefault("voters", {}).pop(str(user_id), None)
+    if previous and previous.get("choice") == "yes":
+        state["last_removed_yes_label"] = previous.get("name") or f"id{user_id}"
+    return previous
+
+
 def counts(state: dict) -> Counts:
     voters = state.get("voters", {}).values()
     return Counts(
@@ -134,16 +141,15 @@ def evaluate_threshold(state: dict, threshold: int) -> list[Notification]:
 def format_status(state: dict, threshold: int, detailed: bool = False) -> str:
     result = counts(state)
     header = (
-        f"ДА: {result.yes} + {result.manual_yes} приглашённых = "
-        f"{result.total_yes} / {threshold}\nНет: {result.no}"
+        f"«ДА»: {result.yes} + {result.manual_yes} вручную = "
+        f"{result.total_yes} / {threshold}\n«Нет»: {result.no}"
     )
     if not detailed:
         return header
     yes_names = [v["name"] for v in state.get("voters", {}).values() if v["choice"] == "yes"]
-    no_names = [v["name"] for v in state.get("voters", {}).values() if v["choice"] == "no"]
     guest_names = [v["label"] for v in state.get("manual_yes_voters", {}).values()]
     sections = []
-    for title, names in (("ДА", yes_names), ("Приглашённые", guest_names), ("Нет", no_names)):
+    for title, names in (("Реальные «ДА»", yes_names), ("Виртуальные +1", guest_names)):
         if names:
             sections.append(
                 title + ":\n" + "\n".join(f"{i}. {name}" for i, name in enumerate(names, 1))
