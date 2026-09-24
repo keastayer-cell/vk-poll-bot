@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bot
-Group=bot
+User=vkbot
+Group=vkbot
 WorkingDirectory=/opt/vk-poll-bot
 EnvironmentFile=/opt/vk-poll-bot/.env
 ExecStart=/opt/vk-poll-bot/.venv/bin/python /opt/vk-poll-bot/main.py
