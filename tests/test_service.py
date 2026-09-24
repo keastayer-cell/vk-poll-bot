@@ -30,6 +30,7 @@ def test_create_poll_and_prevent_duplicate(tmp_path) -> None:
         assert len(chat_messages) == 2
         assert chat_messages[1][1].startswith("Я создал опрос — проголосуйте.")
         assert "+1 ФИО" in chat_messages[1][1]
+        assert chat_messages[1][1].endswith("/status")
 
     asyncio.run(scenario())
 
