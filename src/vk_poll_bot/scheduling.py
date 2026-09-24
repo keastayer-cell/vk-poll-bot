@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-JOB_KEYS = ("poll", "deadline", "close", "reminder")
+JOB_KEYS = ("poll", "deadline", "close", "remind_mon", "remind_thu")
 
 
 def is_scheduled_day(now: datetime, days: str) -> bool:
@@ -37,10 +37,11 @@ class ScheduleManager:
 
     def reschedule(self) -> None:
         callbacks = {
-            "poll": self.service.create_poll,
-            "deadline": self.service.check_deadline,
-            "close": self.service.close_poll,
-            "reminder": self.service.remind_game,
+            "poll": (self.service.create_poll, []),
+            "deadline": (self.service.check_deadline, []),
+            "close": (self.service.close_poll, []),
+            "remind_mon": (self.service.remind_game, ["remind_mon"]),
+            "remind_thu": (self.service.remind_game, ["remind_thu"]),
         }
         for key in JOB_KEYS:
             try:
@@ -49,9 +50,10 @@ class ScheduleManager:
                 pass
             config = self.service.schedule
             self.scheduler.add_job(
-                callbacks[key],
+                callbacks[key][0],
                 "cron",
                 id=f"job_{key}",
+                args=callbacks[key][1],
                 day_of_week=config[f"{key}_days"],
                 hour=config[f"{key}_hour"],
                 minute=config[f"{key}_minute"],
@@ -77,9 +79,14 @@ class ScheduleManager:
             deadline_at = scheduled_at(now, config["deadline_hour"], config["deadline_minute"])
             if is_scheduled_day(now, config["deadline_days"]) and deadline_at <= now:
                 await self.service.check_deadline()
-            reminder_at = scheduled_at(now, config["reminder_hour"], config["reminder_minute"])
-            if is_scheduled_day(now, config["reminder_days"]) and reminder_at <= now:
-                await self.service.remind_game()
+            for reminder_key in ("remind_mon", "remind_thu"):
+                reminder_at = scheduled_at(
+                    now,
+                    config[f"{reminder_key}_hour"],
+                    config[f"{reminder_key}_minute"],
+                )
+                if is_scheduled_day(now, config[f"{reminder_key}_days"]) and reminder_at <= now:
+                    await self.service.remind_game(reminder_key)
         if active_today and close_today and close_at <= now:
             await self.service.close_poll()
 

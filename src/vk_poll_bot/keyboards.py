@@ -5,7 +5,10 @@ def poll_keyboard(poll_date: str, *, disabled: bool = False) -> str:
     if disabled:
         return json.dumps({"inline": True, "buttons": []}, ensure_ascii=False)
     buttons = []
-    for label, choice, color in (("ДА", "yes", "positive"), ("Нет", "no", "negative")):
+    for label, choice, color in (
+        ("✅ ИДУ", "yes", "positive"),
+        ("❌ НЕ ИДУ", "no", "negative"),
+    ):
         payload = json.dumps(
             {"command": "vote", "choice": choice, "poll_date": poll_date},
             ensure_ascii=False,

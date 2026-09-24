@@ -12,4 +12,6 @@ def test_default_schedule_is_monday_and_thursday(monkeypatch, tmp_path) -> None:
 
     assert settings.poll_days == "mon,thu"
     assert (settings.poll_hour, settings.poll_minute) == (8, 0)
+    assert (settings.remind_mon_hour, settings.remind_mon_minute) == (19, 45)
+    assert (settings.remind_thu_hour, settings.remind_thu_minute) == (18, 15)
     assert settings.peer_id == 0

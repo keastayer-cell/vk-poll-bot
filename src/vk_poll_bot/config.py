@@ -63,8 +63,10 @@ class Settings:
     deadline_minute: int
     close_hour: int
     close_minute: int
-    reminder_hour: int
-    reminder_minute: int
+    remind_mon_hour: int
+    remind_mon_minute: int
+    remind_thu_hour: int
+    remind_thu_minute: int
     data_dir: Path
     enable_scheduler: bool
 
@@ -80,9 +82,12 @@ class Settings:
             "close_days": self.poll_days,
             "close_hour": self.close_hour,
             "close_minute": self.close_minute,
-            "reminder_days": self.poll_days,
-            "reminder_hour": self.reminder_hour,
-            "reminder_minute": self.reminder_minute,
+            "remind_mon_days": "mon",
+            "remind_mon_hour": self.remind_mon_hour,
+            "remind_mon_minute": self.remind_mon_minute,
+            "remind_thu_days": "thu",
+            "remind_thu_hour": self.remind_thu_hour,
+            "remind_thu_minute": self.remind_thu_minute,
         }
 
 
@@ -101,7 +106,8 @@ def load_settings(base_dir: str | Path = ".") -> Settings:
     poll_hour, poll_minute = _time("POLL_TIME", "08:00")
     deadline_hour, deadline_minute = _time("DEADLINE_TIME", "15:00")
     close_hour, close_minute = _time("CLOSE_TIME", "20:00")
-    reminder_hour, reminder_minute = _time("REMINDER_TIME", "19:00")
+    remind_mon_hour, remind_mon_minute = _time("REMIND_MON_TIME", "19:45")
+    remind_thu_hour, remind_thu_minute = _time("REMIND_THU_TIME", "18:15")
     data_dir_raw = os.getenv("DATA_DIR", ".").strip() or "."
     data_dir = Path(data_dir_raw)
     if not data_dir.is_absolute():
@@ -122,8 +128,10 @@ def load_settings(base_dir: str | Path = ".") -> Settings:
         deadline_minute=deadline_minute,
         close_hour=close_hour,
         close_minute=close_minute,
-        reminder_hour=reminder_hour,
-        reminder_minute=reminder_minute,
+        remind_mon_hour=remind_mon_hour,
+        remind_mon_minute=remind_mon_minute,
+        remind_thu_hour=remind_thu_hour,
+        remind_thu_minute=remind_thu_minute,
         data_dir=data_dir.resolve(),
         enable_scheduler=os.getenv("ENABLE_SCHEDULER", "0").strip() == "1",
     )

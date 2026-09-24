@@ -23,15 +23,41 @@ TIME_KEYS = {
     "poll": ("poll_hour", "poll_minute", "запуск опроса"),
     "deadline": ("deadline_hour", "deadline_minute", "дедлайн"),
     "close": ("close_hour", "close_minute", "закрытие"),
-    "reminder": ("reminder_hour", "reminder_minute", "напоминание"),
+    "remind_mon": ("remind_mon_hour", "remind_mon_minute", "напоминание в понедельник"),
+    "remind_thu": ("remind_thu_hour", "remind_thu_minute", "напоминание в четверг"),
 }
 DAY_KEYS = {
     "poll": "poll_days",
     "deadline": "deadline_days",
     "close": "close_days",
-    "reminder": "reminder_days",
+    "remind_mon": "remind_mon_days",
+    "remind_thu": "remind_thu_days",
 }
 VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+RU_WEEKDAYS = (
+    "Понедельник",
+    "Вторник",
+    "Среда",
+    "Четверг",
+    "Пятница",
+    "Суббота",
+    "Воскресенье",
+)
+RU_MONTHS = (
+    "",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
 
 
 class PollService:
@@ -66,11 +92,47 @@ class PollService:
         poll = poll or self.poll
         if poll is None:
             return "Активного опроса нет."
-        state_label = "🟢 Голосование открыто" if poll.get("is_open") else "🔴 Голосование закрыто"
-        status = format_status(poll, self.settings.yes_threshold, detailed=True)
-        return f"📊 {poll['question']}\n{state_label}\n\n{status}"
+        try:
+            poll_date = datetime.strptime(poll["poll_date"], "%Y-%m-%d")
+            date_text = (
+                f"{RU_WEEKDAYS[poll_date.weekday()]}, {poll_date.day} {RU_MONTHS[poll_date.month]}"
+            )
+        except (KeyError, TypeError, ValueError):
+            date_text = str(poll.get("poll_date", ""))
+        result = counts(poll)
+        yes_names = [
+            voter["name"]
+            for voter in poll.get("voters", {}).values()
+            if voter.get("choice") == "yes"
+        ]
+        no_names = [
+            voter["name"]
+            for voter in poll.get("voters", {}).values()
+            if voter.get("choice") == "no"
+        ]
+        guest_names = [vote["label"] for vote in poll.get("manual_yes_voters", {}).values()]
+        roster = [
+            f"✅ Идут ({result.yes}): {', '.join(yes_names) or '—'}",
+            f"➕ Гости ({result.manual_yes}): {', '.join(guest_names) or '—'}",
+            f"❌ Не идут ({result.no}): {', '.join(no_names) or '—'}",
+        ]
+        if result.total_yes >= self.settings.yes_threshold:
+            progress = f"🔥 Команда собрана: {result.total_yes} / {self.settings.yes_threshold}"
+        else:
+            missing = self.settings.yes_threshold - result.total_yes
+            progress = (
+                f"👥 Собрано: {result.total_yes} / {self.settings.yes_threshold}"
+                f"  ·  Не хватает: {missing}"
+            )
+        if poll.get("is_open"):
+            heading = f"⚽ {poll['question']}"
+            footer = "Гость: +1 ФИО  ·  Получить статистику: /status"
+        else:
+            heading = "🏁 Голосование завершено"
+            footer = "Итоговый состав сохранён."
+        return "\n".join([heading, f"📅 {date_text}", "", *roster, "", progress, "", footer])
 
-    async def _send(self, peer_id: int, text: str) -> int:
+    async def _send(self, peer_id: int, text: str):
         return await self.api.send_message(peer_id, text)
 
     async def _notify_admins(self, text: str) -> None:
@@ -89,14 +151,17 @@ class PollService:
 
     async def _refresh_poll_message(self, poll: dict | None = None) -> None:
         poll = poll or self.poll
-        if not poll or not poll.get("message_id"):
+        if not poll or not (poll.get("message_id") or poll.get("conversation_message_id")):
             return
         keyboard = poll_keyboard(poll["poll_date"], disabled=not poll.get("is_open", False))
+        message_id = int(poll.get("message_id", 0))
+        conversation_message_id = 0 if message_id else int(poll.get("conversation_message_id", 0))
         await self.api.edit_message(
             int(poll["peer_id"]),
-            int(poll["message_id"]),
             self.render_poll(poll),
             keyboard,
+            message_id=message_id,
+            conversation_message_id=conversation_message_id,
         )
 
     async def create_poll(self, poll_date: str | None = None, force: bool = False) -> bool:
@@ -119,24 +184,45 @@ class PollService:
                 except Exception as error:
                     self.logger.warning("Не удалось закрыть предыдущий опрос: %s", error)
             poll = new_poll_state(target_date, self.settings.poll_question, self.settings.peer_id)
-            message_id = await self.api.send_message(
+            sent_message = await self.api.send_message(
                 self.settings.peer_id,
                 self.render_poll(poll),
                 poll_keyboard(target_date),
             )
-            poll["message_id"] = message_id
+            poll["message_id"] = sent_message.message_id
+            poll["conversation_message_id"] = sent_message.conversation_message_id
+            poll["random_id"] = sent_message.random_id
             self.state["current_poll"] = poll
             self.save()
+            if sent_message.message_id or sent_message.conversation_message_id:
+                try:
+                    pin_message_id = sent_message.message_id
+                    await self.api.pin_message(
+                        self.settings.peer_id,
+                        message_id=pin_message_id,
+                        conversation_message_id=(
+                            0 if pin_message_id else sent_message.conversation_message_id
+                        ),
+                    )
+                except Exception as error:
+                    self.logger.warning("Опрос создан, но не закреплён: %s", error)
+            else:
+                self.logger.info("VK пока не вернул ID опроса; ожидаю событие message_reply")
             try:
-                await self.api.pin_message(self.settings.peer_id, message_id)
+                await self._send(
+                    self.settings.peer_id,
+                    "Я создал опрос — проголосуйте.\n\n"
+                    "Если хотите пригласить человека на игру, напишите в чат:\n"
+                    "+1 ФИО\n\n"
+                    "Например: +1 Иванов Иван\n\n"
+                    "Обязательно укажите имя приглашённого, чтобы всем было понятно, "
+                    "кого добавили.",
+                )
             except Exception as error:
-                self.logger.warning("Опрос создан, но не закреплён: %s", error)
-            await self._send(
-                self.settings.peer_id,
-                "Если хотите пригласить человека, напишите +1 ФИО. Например: +1 Иванов Иван.",
-            )
+                self.logger.warning("Не удалось отправить инструкцию к опросу: %s", error)
+            date_text = datetime.strptime(target_date, "%Y-%m-%d").strftime("%d.%m.%Y")
             await self._notify_admins(
-                f"📋 Опрос за {target_date} запущен. ID сообщения: {message_id}"
+                f'📋 Я запустил опрос "{date_text}".\n\nЯ буду сообщать Вам о его результатах.'
             )
             return True
 
@@ -161,6 +247,8 @@ class PollService:
                 answer = "Неизвестный вариант ответа"
             else:
                 choice = payload["choice"]
+                if not poll.get("conversation_message_id"):
+                    poll["conversation_message_id"] = int(obj.get("conversation_message_id", 0))
                 name = await self.api.user_name(user_id)
                 previous = set_vote(poll, user_id, name, choice)
                 await self._send_threshold_events(poll)
@@ -175,6 +263,37 @@ class PollService:
                 await self.api.answer_event(event_id, user_id, peer_id, answer)
             except Exception as error:
                 self.logger.warning("Не удалось показать ответ на кнопку: %s", error)
+
+    async def handle_outgoing_message(self, event: dict) -> None:
+        obj = event.get("object", {})
+        message = obj.get("message", obj)
+        poll = self.poll
+        if not poll:
+            return
+        random_matches = int(message.get("random_id", 0)) == int(poll.get("random_id", 0))
+        text_matches = str(message.get("text", "")) == self.render_poll(poll)
+        if not (random_matches or text_matches):
+            return
+        poll["message_id"] = int(message.get("id", 0))
+        poll["conversation_message_id"] = int(message.get("conversation_message_id", 0))
+        self.save()
+        try:
+            message_id = int(poll.get("message_id", 0))
+            await self.api.pin_message(
+                self.settings.peer_id,
+                message_id=message_id,
+                conversation_message_id=(
+                    0 if message_id else int(poll.get("conversation_message_id", 0))
+                ),
+            )
+        except Exception as error:
+            self.logger.warning("Не удалось закрепить опрос после подтверждения VK: %s", error)
+        else:
+            self.logger.info(
+                "Опрос закреплён после message_reply: message_id=%s, cmid=%s",
+                poll.get("message_id"),
+                poll.get("conversation_message_id"),
+            )
 
     async def add_guest(self, label: str, user_id: int, user_name: str) -> None:
         async with self.lock:
@@ -216,15 +335,23 @@ class PollService:
                 return
             poll["is_open"] = False
             self.save()
-            await self._refresh_poll_message(poll)
+            try:
+                await self._refresh_poll_message(poll)
+            except Exception as error:
+                self.logger.warning("Не удалось обновить закрытый опрос: %s", error)
             try:
                 await self.api.unpin_message(self.settings.peer_id)
             except Exception as error:
                 self.logger.warning("Не удалось открепить закрытый опрос: %s", error)
-            await self._send(
-                self.settings.peer_id,
-                f"Голосование закрыто.\n{format_status(poll, self.settings.yes_threshold)}",
-            )
+            try:
+                await self._send(
+                    self.settings.peer_id,
+                    f"Голосование закрыто.\n{format_status(poll, self.settings.yes_threshold)}",
+                )
+            except Exception as error:
+                self.logger.warning("Не удалось отправить итог закрытого опроса: %s", error)
+            self.state["current_poll"] = None
+            self.save()
 
     async def check_deadline(self) -> None:
         poll = self.poll
@@ -240,26 +367,30 @@ class PollService:
         self.save()
         total = counts(poll).total_yes
         if total < self.settings.yes_threshold:
+            deadline_time = (
+                f"{self.schedule['deadline_hour']:02d}:{self.schedule['deadline_minute']:02d}"
+            )
             await self._notify_admins(
-                f"⚠️ Дедлайн — в опросе только {total} «ДА» из {self.settings.yes_threshold} нужных."
+                f"⚠️ {deadline_time} — в опросе только {total} «ДА» "
+                f"из {self.settings.yes_threshold} нужных."
             )
 
-    async def remind_game(self) -> None:
+    async def remind_game(self, reminder_key: str) -> None:
         poll = self.poll
         today = self.now().strftime("%Y-%m-%d")
         if (
             not poll
             or poll.get("poll_date") != today
-            or poll.get("sent_reminder")
+            or reminder_key in poll.get("sent_reminders", [])
             or counts(poll).total_yes < self.settings.yes_threshold
         ):
             return
-        poll["sent_reminder"] = True
-        self.save()
         await self._send(
             self.settings.peer_id,
             "Мужчины, напоминаю что сегодня вы играете. Всем приятной игры и без травм 🏃",
         )
+        poll.setdefault("sent_reminders", []).append(reminder_key)
+        self.save()
 
     def schedule_text(self) -> str:
         s = self.schedule
@@ -267,7 +398,10 @@ class PollService:
             f"Опрос: {s['poll_days']} {s['poll_hour']:02d}:{s['poll_minute']:02d}\n"
             f"Дедлайн: {s['deadline_days']} {s['deadline_hour']:02d}:{s['deadline_minute']:02d}\n"
             f"Закрытие: {s['close_days']} {s['close_hour']:02d}:{s['close_minute']:02d}\n"
-            f"Напоминание: {s['reminder_days']} {s['reminder_hour']:02d}:{s['reminder_minute']:02d}"
+            f"Напоминание пн: {s['remind_mon_days']} "
+            f"{s['remind_mon_hour']:02d}:{s['remind_mon_minute']:02d}\n"
+            f"Напоминание чт: {s['remind_thu_days']} "
+            f"{s['remind_thu_hour']:02d}:{s['remind_thu_minute']:02d}"
         )
 
     async def _reschedule(self) -> None:
@@ -281,7 +415,7 @@ class PollService:
         if not args:
             return self.schedule_text()
         if len(args) != 2 or args[0] not in TIME_KEYS:
-            return "Формат: /settime poll|deadline|close|reminder ЧЧ:ММ"
+            return "Формат: /settime poll|deadline|close|remind_mon|remind_thu ЧЧ:ММ"
         try:
             hour_text, minute_text = args[1].split(":", 1)
             hour, minute = int(hour_text), int(minute_text)
@@ -299,7 +433,7 @@ class PollService:
         if not args:
             return self.schedule_text()
         if len(args) != 2 or args[0] not in DAY_KEYS:
-            return "Формат: /setdays poll|deadline|close|reminder mon,thu"
+            return "Формат: /setdays poll|deadline|close|remind_mon|remind_thu mon,thu"
         days = [day.strip().lower() for day in args[1].split(",")]
         if not days or any(day not in VALID_DAYS for day in days):
             return "Допустимые дни: mon,tue,wed,thu,fri,sat,sun"
@@ -332,6 +466,13 @@ class PollService:
             await self._send(peer_id, "Ввод объявления отменён.")
             return
         if peer_id != self.settings.peer_id:
+            if command in {"/start", "/help"} and self.is_admin(user_id):
+                await self._send(
+                    peer_id,
+                    "Личные уведомления администратора включены. "
+                    "Сюда будут приходить сообщения о запуске опроса и дедлайне.",
+                )
+                return
             if command == "/announce" and self.is_admin(user_id):
                 self.pending_announcements.add(user_id)
                 await self._send(peer_id, "Пришлите следующим сообщением текст объявления.")
@@ -347,9 +488,8 @@ class PollService:
             return
         if command == "/poll" and self.is_admin(user_id):
             created = await self.create_poll(force=False)
-            await self._send(
-                peer_id, "Опрос запущен." if created else "Сегодняшний опрос уже активен."
-            )
+            if not created:
+                await self._refresh_poll_message()
             return
         if command == "/close" and self.is_admin(user_id):
             await self.close_poll()
@@ -382,6 +522,8 @@ class PollService:
                 await self.handle_vote_event(event)
             elif event_type == "message_new":
                 await self.handle_message_event(event)
+            elif event_type == "message_reply":
+                await self.handle_outgoing_message(event)
         except VkApiError as error:
             self.logger.error("Ошибка VK API при обработке события: %s", error)
         except Exception:

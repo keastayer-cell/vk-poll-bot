@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from vk_poll_bot.api import SentMessage
+
 
 class FakeApi:
     def __init__(self):
@@ -15,13 +17,21 @@ class FakeApi:
     async def send_message(self, peer_id, text, keyboard=None):
         self.sent.append((peer_id, text, keyboard))
         self.next_message_id += 1
-        return self.next_message_id
+        return SentMessage(message_id=self.next_message_id, random_id=self.next_message_id + 1000)
 
-    async def edit_message(self, peer_id, message_id, text, keyboard=None):
-        self.edited.append((peer_id, message_id, text, keyboard))
+    async def edit_message(
+        self,
+        peer_id,
+        text,
+        keyboard=None,
+        *,
+        message_id=0,
+        conversation_message_id=0,
+    ):
+        self.edited.append((peer_id, message_id, conversation_message_id, text, keyboard))
 
-    async def pin_message(self, peer_id, message_id):
-        self.pinned.append((peer_id, message_id))
+    async def pin_message(self, peer_id, *, message_id=0, conversation_message_id=0):
+        self.pinned.append((peer_id, message_id, conversation_message_id))
 
     async def unpin_message(self, peer_id):
         self.unpinned.append(peer_id)
@@ -50,9 +60,12 @@ def make_settings(tmp_path: Path, **overrides):
             "close_days": "mon,thu",
             "close_hour": 20,
             "close_minute": 0,
-            "reminder_days": "mon,thu",
-            "reminder_hour": 19,
-            "reminder_minute": 0,
+            "remind_mon_days": "mon",
+            "remind_mon_hour": 19,
+            "remind_mon_minute": 45,
+            "remind_thu_days": "thu",
+            "remind_thu_hour": 18,
+            "remind_thu_minute": 15,
         },
         "data_dir": tmp_path,
     }

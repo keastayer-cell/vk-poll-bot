@@ -67,4 +67,7 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="проверить токен и Long Poll")
     args = parser.parse_args()
     base_dir = Path(__file__).resolve().parents[2]
-    asyncio.run(run(base_dir, check=args.check))
+    try:
+        asyncio.run(run(base_dir, check=args.check))
+    except KeyboardInterrupt:
+        pass

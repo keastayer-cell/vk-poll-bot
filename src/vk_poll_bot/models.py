@@ -21,6 +21,8 @@ class PollState(TypedDict, total=False):
     is_open: bool
     peer_id: int
     message_id: int
+    conversation_message_id: int
+    random_id: int
     voters: dict[str, Voter]
     manual_yes_voters: dict[str, ManualVote]
     manual_yes_seq: int
@@ -29,7 +31,7 @@ class PollState(TypedDict, total=False):
     notified_almost: bool
     notified_yes: bool
     notified_deadline: bool
-    sent_reminder: bool
+    sent_reminders: list[str]
 
 
 def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState:
@@ -39,6 +41,8 @@ def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState
         "is_open": True,
         "peer_id": peer_id,
         "message_id": 0,
+        "conversation_message_id": 0,
+        "random_id": 0,
         "voters": {},
         "manual_yes_voters": {},
         "manual_yes_seq": 0,
@@ -47,7 +51,7 @@ def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState
         "notified_almost": False,
         "notified_yes": False,
         "notified_deadline": False,
-        "sent_reminder": False,
+        "sent_reminders": [],
     }
 
 
@@ -71,5 +75,6 @@ def normalize_state(data: Any, default_schedule: dict) -> dict:
         defaults.update(poll)
         defaults["voters"] = dict(defaults.get("voters", {}))
         defaults["manual_yes_voters"] = dict(defaults.get("manual_yes_voters", {}))
+        defaults["sent_reminders"] = list(defaults.get("sent_reminders", []))
         result["current_poll"] = defaults
     return result

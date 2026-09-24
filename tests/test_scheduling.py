@@ -26,9 +26,12 @@ class FakeScheduledService:
             "close_days": "mon,thu",
             "close_hour": 20,
             "close_minute": 0,
-            "reminder_days": "mon,thu",
-            "reminder_hour": 19,
-            "reminder_minute": 0,
+            "remind_mon_days": "mon",
+            "remind_mon_hour": 19,
+            "remind_mon_minute": 45,
+            "remind_thu_days": "thu",
+            "remind_thu_hour": 18,
+            "remind_thu_minute": 15,
         }
         self.poll = None
         self.calls = []
@@ -40,8 +43,8 @@ class FakeScheduledService:
     async def check_deadline(self):
         self.calls.append(("deadline", None))
 
-    async def remind_game(self):
-        self.calls.append(("reminder", None))
+    async def remind_game(self, reminder_key):
+        self.calls.append((reminder_key, None))
 
     async def close_poll(self):
         self.calls.append(("close", None))
@@ -59,5 +62,5 @@ def test_reconcile_runs_missed_jobs_in_order() -> None:
     assert service.calls == [
         ("poll", "2026-09-24"),
         ("deadline", None),
-        ("reminder", None),
+        ("remind_thu", None),
     ]

@@ -4,7 +4,5 @@ __pycache__/
 .ruff_cache/
 *.py[cod]
 .env
-state.json
-state.json.bak
+state*.json*
 bot.log*
-

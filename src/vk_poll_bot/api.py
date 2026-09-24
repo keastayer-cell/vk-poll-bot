@@ -27,6 +27,13 @@ class LongPollServer:
     ts: str
 
 
+@dataclass(frozen=True)
+class SentMessage:
+    message_id: int = 0
+    conversation_message_id: int = 0
+    random_id: int = 0
+
+
 class VkApiClient:
     def __init__(
         self,
@@ -67,37 +74,62 @@ class VkApiClient:
             ts=str(response["ts"]),
         )
 
-    async def send_message(self, peer_id: int, text: str, keyboard: str | None = None) -> int:
+    async def send_message(
+        self, peer_id: int, text: str, keyboard: str | None = None
+    ) -> SentMessage:
+        random_id = secrets.randbelow(2_147_483_647) + 1
         response = await self.call(
             "messages.send",
-            peer_id=peer_id,
-            random_id=secrets.randbelow(2_147_483_647) + 1,
+            peer_ids=str(peer_id),
+            random_id=random_id,
             message=text,
             keyboard=keyboard,
             group_id=self.group_id,
         )
+        if isinstance(response, list):
+            response = response[0] if response else {}
         if isinstance(response, dict):
-            return int(response.get("message_id", response.get("conversation_message_id", 0)))
-        return int(response)
+            return SentMessage(
+                message_id=int(response.get("message_id", 0)),
+                conversation_message_id=int(response.get("conversation_message_id", 0)),
+                random_id=random_id,
+            )
+        return SentMessage(message_id=int(response), random_id=random_id)
 
     async def edit_message(
         self,
         peer_id: int,
-        message_id: int,
         text: str,
         keyboard: str | None = None,
+        *,
+        message_id: int = 0,
+        conversation_message_id: int = 0,
     ) -> None:
+        cmid = 0 if message_id else conversation_message_id
         await self.call(
             "messages.edit",
             peer_id=peer_id,
-            message_id=message_id,
+            message_id=message_id or None,
+            cmid=cmid or None,
             message=text,
             keyboard=keyboard,
             group_id=self.group_id,
         )
 
-    async def pin_message(self, peer_id: int, message_id: int) -> None:
-        await self.call("messages.pin", peer_id=peer_id, message_id=message_id)
+    async def pin_message(
+        self,
+        peer_id: int,
+        *,
+        message_id: int = 0,
+        conversation_message_id: int = 0,
+    ) -> None:
+        cmid = 0 if message_id else conversation_message_id
+        await self.call(
+            "messages.pin",
+            peer_id=peer_id,
+            message_id=message_id or None,
+            cmid=cmid or None,
+        )
 
     async def unpin_message(self, peer_id: int) -> None:
         await self.call("messages.unpin", peer_id=peer_id, group_id=self.group_id)
