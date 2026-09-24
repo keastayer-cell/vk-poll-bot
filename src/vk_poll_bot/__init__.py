@@ -1,2 +1,1 @@
 """VK poll bot package."""
-

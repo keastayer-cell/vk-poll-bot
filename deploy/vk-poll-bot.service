@@ -1,0 +1,19 @@
+[Unit]
+Description=VK Poll Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+Group=bot
+WorkingDirectory=/opt/vk-poll-bot
+EnvironmentFile=/opt/vk-poll-bot/.env
+ExecStart=/opt/vk-poll-bot/.venv/bin/python /opt/vk-poll-bot/main.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

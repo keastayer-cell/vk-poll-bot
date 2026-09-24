@@ -1,5 +1,5 @@
 from vk_poll_bot.models import new_poll_state
-from vk_poll_bot.votes import counts, format_status, set_vote
+from vk_poll_bot.votes import counts, evaluate_threshold, format_status, parse_plus_one, set_vote
 
 
 def test_vote_can_be_changed() -> None:
@@ -20,3 +20,20 @@ def test_manual_votes_are_included_in_total() -> None:
 
     assert format_status(state, 10) == "ДА: 1 + 1 приглашённых = 2 / 10\nНет: 0"
 
+
+def test_threshold_and_quorum_loss_notifications() -> None:
+    state = new_poll_state("2026-09-24", "Идете?")
+    set_vote(state, 1, "Первый", "yes")
+    assert [event.text for event in evaluate_threshold(state, 2)] == ["Братики, еще 1 и идем 💪"]
+
+    set_vote(state, 2, "Второй", "yes")
+    assert len(evaluate_threshold(state, 2)) == 2
+
+    set_vote(state, 2, "Второй", "no")
+    assert "Нас снова не хватает" in evaluate_threshold(state, 2)[0].text
+
+
+def test_plus_one_parser_accepts_compact_form() -> None:
+    assert parse_plus_one("+1Иванов", "Антон") == "Иванов"
+    assert parse_plus_one("+1", "Антон") == "Гость от Антон"
+    assert parse_plus_one("со мной +1 Иванов", "Антон") is None
