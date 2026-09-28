@@ -1,7 +1,7 @@
 import json
 
 
-def poll_keyboard(poll_date: str, *, disabled: bool = False) -> str:
+def poll_keyboard(poll_date: str, *, disabled: bool = False, show_roster: bool = False) -> str:
     if disabled:
         return json.dumps({"inline": True, "buttons": []}, ensure_ascii=False)
     vote_buttons = []
@@ -31,8 +31,20 @@ def poll_keyboard(poll_date: str, *, disabled: bool = False) -> str:
         },
         "color": "secondary",
     }
+    roster_payload = json.dumps(
+        {"command": "toggle_roster", "poll_date": poll_date},
+        ensure_ascii=False,
+    )
+    roster_button = {
+        "action": {
+            "type": "callback",
+            "label": "🙈 СКРЫТЬ СОСТАВ" if show_roster else "👥 ПОКАЗАТЬ СОСТАВ",
+            "payload": roster_payload,
+        },
+        "color": "secondary",
+    }
     return json.dumps(
-        {"inline": True, "buttons": [vote_buttons, [cancel_button]]},
+        {"inline": True, "buttons": [vote_buttons, [cancel_button], [roster_button]]},
         ensure_ascii=False,
     )
 

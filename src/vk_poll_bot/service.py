@@ -101,11 +101,38 @@ class PollService:
         except (KeyError, TypeError, ValueError):
             date_text = str(poll.get("poll_date", ""))
         result = counts(poll)
-        roster = [
-            f"✅ Идут: {result.yes}",
-            f"➕ Приглашённые: {result.manual_yes}",
-            f"❌ Не идут: {result.no}",
-        ]
+        if poll.get("show_roster"):
+            yes_names = [
+                voter["name"]
+                for voter in poll.get("voters", {}).values()
+                if voter.get("choice") == "yes"
+            ]
+            guest_names = [vote["label"] for vote in poll.get("manual_yes_voters", {}).values()]
+            no_names = [
+                voter["name"]
+                for voter in poll.get("voters", {}).values()
+                if voter.get("choice") == "no"
+            ]
+
+            def numbered(names: list[str]) -> list[str]:
+                return [f"{index}. {name}" for index, name in enumerate(names, 1)] or ["—"]
+
+            roster = [
+                f"✅ Идут ({result.yes}):",
+                *numbered(yes_names),
+                "",
+                f"➕ Приглашённые ({result.manual_yes}):",
+                *numbered(guest_names),
+                "",
+                f"❌ Не идут ({result.no}):",
+                *numbered(no_names),
+            ]
+        else:
+            roster = [
+                f"✅ Идут: {result.yes}",
+                f"➕ Приглашённые: {result.manual_yes}",
+                f"❌ Не идут: {result.no}",
+            ]
         if result.total_yes >= self.settings.yes_threshold:
             progress = f"🔥 Команда собрана: {result.total_yes} / {self.settings.yes_threshold}"
         else:
@@ -165,7 +192,11 @@ class PollService:
         poll = poll or self.poll
         if not poll or not (poll.get("message_id") or poll.get("conversation_message_id")):
             return
-        keyboard = poll_keyboard(poll["poll_date"], disabled=not poll.get("is_open", False))
+        keyboard = poll_keyboard(
+            poll["poll_date"],
+            disabled=not poll.get("is_open", False),
+            show_roster=bool(poll.get("show_roster")),
+        )
         message_id = int(poll.get("message_id", 0))
         conversation_message_id = 0 if message_id else int(poll.get("conversation_message_id", 0))
         await self.api.edit_message(
@@ -252,7 +283,8 @@ class PollService:
         peer_id = int(obj.get("peer_id", 0))
         event_id = str(obj.get("event_id", ""))
         payload = decode_payload(obj.get("payload"))
-        if payload.get("command") != "vote":
+        command = payload.get("command")
+        if command not in {"vote", "toggle_roster"}:
             return
         answer = "Не удалось принять голос"
         async with self.lock:
@@ -263,6 +295,11 @@ class PollService:
                 answer = "Голосование уже закрыто"
             elif payload.get("poll_date") != poll.get("poll_date"):
                 answer = "Этот опрос уже неактуален"
+            elif command == "toggle_roster":
+                poll["show_roster"] = not bool(poll.get("show_roster"))
+                self.save()
+                await self._refresh_poll_message(poll)
+                answer = "Состав показан" if poll["show_roster"] else "Состав скрыт"
             elif payload.get("choice") not in {"yes", "no", "cancel"}:
                 answer = "Неизвестный вариант ответа"
             else:

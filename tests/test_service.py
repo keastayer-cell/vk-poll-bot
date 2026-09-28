@@ -91,6 +91,40 @@ def test_vote_must_be_cancelled_before_voting_again(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_roster_button_expands_and_collapses_current_poll(tmp_path) -> None:
+    async def scenario():
+        bot, api = make_service(tmp_path)
+        await bot.create_poll("2026-09-24")
+        bot.poll["voters"]["20"] = {"name": "Иван Иванов", "choice": "yes"}
+
+        async def toggle():
+            await bot.handle_vote_event(
+                {
+                    "object": {
+                        "event_id": "toggle-event",
+                        "user_id": 20,
+                        "peer_id": 2_000_000_001,
+                        "payload": {
+                            "command": "toggle_roster",
+                            "poll_date": "2026-09-24",
+                        },
+                    }
+                }
+            )
+
+        await toggle()
+        assert bot.poll["show_roster"] is True
+        assert "1. Иван Иванов" in api.edited[-1][3]
+        expanded_keyboard = json.loads(api.edited[-1][4])
+        assert expanded_keyboard["buttons"][2][0]["action"]["label"] == "🙈 СКРЫТЬ СОСТАВ"
+
+        await toggle()
+        assert bot.poll["show_roster"] is False
+        assert "Иван Иванов" not in api.edited[-1][3]
+
+    asyncio.run(scenario())
+
+
 def test_plus_one_from_regular_chat_member(tmp_path) -> None:
     async def scenario():
         bot, api = make_service(tmp_path)

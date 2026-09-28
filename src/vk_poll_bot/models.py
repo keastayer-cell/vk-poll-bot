@@ -32,6 +32,7 @@ class PollState(TypedDict, total=False):
     notified_yes: bool
     notified_deadline: bool
     sent_reminders: list[str]
+    show_roster: bool
 
 
 def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState:
@@ -52,6 +53,7 @@ def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState
         "notified_yes": False,
         "notified_deadline": False,
         "sent_reminders": [],
+        "show_roster": False,
     }
 
 
