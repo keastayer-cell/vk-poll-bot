@@ -328,9 +328,8 @@ class PollService:
             ):
                 return False
             if current and current.get("is_open"):
-                record_closed_poll(self.state, current)
-                current["is_open"] = False
-                self.save()
+                if not await self._archive_closed_poll(current):
+                    return False
                 try:
                     await self._refresh_poll_message(current)
                 except Exception as error:
@@ -513,14 +512,29 @@ class PollService:
                 f"Убран: {removed['label']}\n{format_status(poll, self.settings.yes_threshold)}",
             )
 
+    async def _archive_closed_poll(self, poll: dict) -> bool:
+        try:
+            members = await self.api.conversation_members(int(poll["peer_id"]))
+        except Exception as error:
+            self.logger.warning("Не удалось получить участников при закрытии: %s", error)
+            await self._send(
+                self.settings.peer_id,
+                "Не удалось получить список участников беседы. Опрос пока открыт, "
+                "статистика не изменена. Повторите /close.",
+            )
+            return False
+        poll["is_open"] = False
+        record_closed_poll(self.state, poll, members)
+        self.save()
+        return True
+
     async def close_poll(self) -> None:
         async with self.lock:
             poll = self.poll
             if not poll or not poll.get("is_open"):
                 return
-            record_closed_poll(self.state, poll)
-            poll["is_open"] = False
-            self.save()
+            if not await self._archive_closed_poll(poll):
+                return
             try:
                 await self._refresh_poll_message(poll)
             except Exception as error:

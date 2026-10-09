@@ -46,6 +46,9 @@ class FakeApi:
     async def user_name(self, user_id):
         return self.names.get(user_id, f"User {user_id}")
 
+    async def conversation_members(self, peer_id):
+        return {str(key): value for key, value in self.names.items() if key > 0}
+
 
 
 def make_settings(tmp_path: Path, **overrides):
