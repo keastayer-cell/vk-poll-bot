@@ -89,6 +89,14 @@ class VkApiClient:
         if isinstance(response, list):
             response = response[0] if response else {}
         if isinstance(response, dict):
+            if response.get("error"):
+                error = response["error"]
+                raise VkApiError("messages.send", {
+                    "error_code": error.get("error_code", error.get("code", 0)),
+                    "error_msg": error.get("error_msg", error.get("description", "Send failed")),
+                })
+            if response.get("error_code"):
+                raise VkApiError("messages.send", response)
             return SentMessage(
                 message_id=int(response.get("message_id", 0)),
                 conversation_message_id=int(response.get("conversation_message_id", 0)),

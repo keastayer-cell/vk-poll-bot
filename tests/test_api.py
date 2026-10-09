@@ -7,6 +7,24 @@ import pytest
 from vk_poll_bot.api import VkApiClient, VkApiError
 
 
+@pytest.mark.parametrize("item", [
+    {"peer_id": 20, "message_id": 0, "error": {"code": 901, "description": "Not allowed"}},
+    {"peer_id": 20, "error": {"error_code": 901, "error_msg": "Not allowed"}},
+    {"peer_id": 20, "error_code": 901, "error_msg": "Not allowed"},
+])
+def test_send_message_raises_for_per_recipient_failure(item):
+    async def handler(request):
+        return httpx.Response(200, json={"response": [item]})
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            api = VkApiClient("token", 123, client=client)
+            with pytest.raises(VkApiError) as failure:
+                await api.send_message(20, "Rating")
+            assert failure.value.code == 901
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("message_id,cmid,response", [
     (42, 0, {"42": 1}),
     (0, 12, [{"conversation_message_id": 12, "response": 1}]),
