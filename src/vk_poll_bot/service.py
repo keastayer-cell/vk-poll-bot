@@ -829,6 +829,11 @@ class PollService:
                 else:
                     distribution = self.state.get("team_distribution")
                     if distribution:
+                        if args and args[0].lower() == "rebuild":
+                            await self.refresh_teams(
+                                "Администратор запросил пересборку команд.", force=True,
+                            )
+                            return
                         if not distribution.get("invalidated") and (
                             self.team_snapshot(self.poll) == distribution["snapshot"]
                         ):

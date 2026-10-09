@@ -58,6 +58,20 @@ def test_repeat_and_restart_do_not_duplicate_teams(tmp_path):
     asyncio.run(scenario())
 
 
+def test_admin_can_explicitly_rebuild_teams(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path)
+        await message(bot, "/teams")
+        original = bot.state["team_distribution"]["message_id"]
+        await message(bot, "/teams rebuild", user=99)
+        assert not bot.api.deleted
+        await message(bot, "/teams rebuild")
+        assert bot.api.deleted == [(bot.settings.peer_id, original, 0)]
+        assert len(team_messages(bot.api)) == 2
+        assert any("запросил пересборку" in text for _, text, _ in bot.api.sent)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("private", [False, True])
 def test_rating_changes_only_for_participants_rebuild_teams(tmp_path, private):
     async def scenario():
