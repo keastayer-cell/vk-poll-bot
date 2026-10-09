@@ -5,4 +5,5 @@ __pycache__/
 *.py[cod]
 .env
 state*.json*
+players.json*
 bot.log*

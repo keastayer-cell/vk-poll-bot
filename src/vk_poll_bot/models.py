@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, TypedDict
+from uuid import uuid4
 
 
 class Voter(TypedDict):
@@ -16,6 +17,7 @@ class ManualVote(TypedDict):
 
 
 class PollState(TypedDict, total=False):
+    poll_id: str
     poll_date: str
     question: str
     is_open: bool
@@ -37,6 +39,7 @@ class PollState(TypedDict, total=False):
 
 def new_poll_state(poll_date: str, question: str, peer_id: int = 0) -> PollState:
     return {
+        "poll_id": uuid4().hex,
         "poll_date": poll_date,
         "question": question,
         "is_open": True,
@@ -64,7 +67,19 @@ def normalize_state(data: Any, default_schedule: dict) -> dict:
         "schema_version": 1,
         "current_poll": data.get("current_poll"),
         "schedule": {**default_schedule, **data.get("schedule", {})},
+        "players": data.get("players", {}),
+        "attendance": data.get("attendance", {"players": {}, "polls": {}}),
+        "team_distribution": data.get("team_distribution"),
     }
+    if not isinstance(result["players"], dict):
+        raise ValueError("players должен быть объектом")
+    attendance = result["attendance"]
+    if not isinstance(attendance, dict):
+        raise ValueError("attendance должен быть объектом")
+    for key in ("players", "polls"):
+        attendance.setdefault(key, {})
+        if not isinstance(attendance[key], dict):
+            raise ValueError(f"attendance.{key} должен быть объектом")
     poll = result["current_poll"]
     if poll is not None:
         if not isinstance(poll, dict):

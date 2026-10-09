@@ -8,6 +8,7 @@ class FakeApi:
     def __init__(self):
         self.sent = []
         self.edited = []
+        self.deleted = []
         self.pinned = []
         self.unpinned = []
         self.answers = []
@@ -33,6 +34,9 @@ class FakeApi:
     async def pin_message(self, peer_id, *, message_id=0, conversation_message_id=0):
         self.pinned.append((peer_id, message_id, conversation_message_id))
 
+    async def delete_message(self, peer_id, *, message_id=0, conversation_message_id=0):
+        self.deleted.append((peer_id, message_id, conversation_message_id))
+
     async def unpin_message(self, peer_id):
         self.unpinned.append(peer_id)
 
@@ -43,10 +47,13 @@ class FakeApi:
         return self.names.get(user_id, f"User {user_id}")
 
 
+
 def make_settings(tmp_path: Path, **overrides):
     values = {
         "peer_id": 2_000_000_001,
+        "group_id": 241716551,
         "admin_ids": (10,),
+        "rating_owner_id": 10,
         "timezone": "Europe/Moscow",
         "yes_threshold": 3,
         "poll_question": "Идете?",

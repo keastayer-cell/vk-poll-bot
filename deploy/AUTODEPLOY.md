@@ -1,7 +1,8 @@
 # Автодеплой VK-бота
 
 GitHub Actions выполняет проверки и выкладку при push в `main`.
-Сейчас `AUTO_DEPLOY_ENABLED=false`: deploy-job пропускается даже при ручном запуске.
+Изначально настроено `AUTO_DEPLOY_ENABLED=false`: deploy-job пропускается даже при ручном запуске.
+После согласованного включения новой версии переменная установлена в `true`.
 CI при этом проверяет код без доступа к серверу.
 
 Repository secrets: `VPS_HOST`, `VPS_USER=vkdeploy`, `DEPLOY_KEY`, `SSH_KNOWN_HOSTS`.
@@ -29,5 +30,4 @@ Sudo разрешён только для фиксированного root-owne
 После перезапуска проверяется стабильность процесса 20 секунд и доступность
 VK API/Long Poll через `main.py --check`. Heartbeat и автоматического отката нет.
 
-Для будущего включения установить repository variable `AUTO_DEPLOY_ENABLED=true`.
-Это разрешает следующую выкладку; саму переменную сейчас менять не нужно.
+Для отключения следующих выкладок установить `AUTO_DEPLOY_ENABLED=false`.

@@ -3,12 +3,17 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .api import VkApiError
+from .attendance import record_closed_poll, statistics_text
 from .keyboards import decode_payload, poll_keyboard
 from .models import new_poll_state, normalize_state
+from .ratings import format_rating, parse_rating
+from .teams import add_alias, find_player, name_key, poll_players, teams_text
+from .text_tables import player_row
 from .votes import (
     add_manual_vote,
     counts,
@@ -88,6 +93,89 @@ class PollService:
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.settings.admin_ids
+
+    def can_edit_ratings(self, user_id: int) -> bool:
+        # The test runtime also accepts the older production Settings object.
+        return user_id == getattr(self.settings, "rating_owner_id", 550539899)
+
+    def team_snapshot(self, poll: dict) -> dict | None:
+        try:
+            roster = sorted(poll_players(poll, self.state["players"]), key=lambda p: p["id"])
+        except ValueError:
+            return None
+        return {"poll_id": poll["poll_id"], "players": roster}
+
+    async def publish_teams(self, poll: dict, text: str) -> None:
+        sent = await self._send(self.settings.peer_id, text)
+        poll["teams_requested"] = True
+        self.state["team_distribution"] = {
+            "snapshot": self.team_snapshot(poll), "poll": deepcopy(poll), "text": text,
+            "message_id": sent.message_id,
+            "conversation_message_id": sent.conversation_message_id, "random_id": sent.random_id,
+        }
+        self.save()
+
+    async def refresh_teams(
+        self, reason: str, *, force: bool = False, rebuild: bool = True
+    ) -> None:
+        """Called under the service lock; remove the old snapshot before publishing another."""
+        distribution = self.state.get("team_distribution")
+        if not distribution:
+            if rebuild and self.poll and self.poll.get("teams_requested"):
+                try:
+                    text = teams_text(self.poll, self.state["players"])
+                except ValueError:
+                    return
+                if text.startswith("⚽ КОМАНДА"):
+                    await self.publish_teams(self.poll, text)
+            return
+        poll = self.poll or distribution["poll"]
+        if not force and not distribution.get("invalidated") and (
+            self.team_snapshot(poll) == distribution["snapshot"]
+        ):
+            return
+        distribution["invalidated"] = True
+        distribution["reason"] = reason
+        distribution["rebuild"] = rebuild
+        self.save()
+        ids = {key: int(distribution.get(key, 0))
+               for key in ("message_id", "conversation_message_id")}
+        if not any(ids.values()):
+            # message_reply will supply IDs and finish cleanup, without creating duplicates.
+            await self._send(self.settings.peer_id, f"⚠️ Команды больше неактуальны: {reason}")
+            return
+        try:
+            await self.api.delete_message(self.settings.peer_id, **ids)
+            action = "Старое распределение удалено."
+        except (VkApiError, ValueError) as error:
+            self.logger.warning("Не удалось удалить команды: %s", error)
+            try:
+                await self.api.edit_message(
+                    self.settings.peer_id, f"⚠️ РАСПРЕДЕЛЕНИЕ НЕАКТУАЛЬНО\n{reason}", **ids,
+                )
+                action = "Старое распределение помечено как неактуальное."
+            except VkApiError:
+                await self._send(
+                    self.settings.peer_id,
+                    f"⚠️ Команды больше неактуальны: {reason}\n"
+                    "VK не разрешил удалить или изменить сообщение. "
+                    "После устранения проблемы вызовите /teams.",
+                )
+                return
+        self.state["team_distribution"] = None
+        self.save()
+        await self._send(self.settings.peer_id, f"⚠️ {reason}\n{action}")
+        if rebuild:
+            try:
+                text = teams_text(poll, self.state["players"])
+            except ValueError as error:
+                text = str(error)
+            if text.startswith("⚽ КОМАНДА"):
+                await self.publish_teams(poll, text)
+            else:
+                await self._send(
+                    self.settings.peer_id, f"Новое распределение пока невозможно. {text}"
+                )
 
     def render_poll(self, poll: dict | None = None) -> str:
         poll = poll or self.poll
@@ -208,6 +296,8 @@ class PollService:
         )
 
     async def restore_active_poll(self) -> None:
+        async with self.lock:
+            await self.refresh_teams("Состав или рейтинги изменились после перезапуска.")
         poll = self.poll
         if not poll or not poll.get("is_open"):
             return
@@ -234,11 +324,14 @@ class PollService:
             ):
                 return False
             if current and current.get("is_open"):
+                record_closed_poll(self.state, current)
                 current["is_open"] = False
+                self.save()
                 try:
                     await self._refresh_poll_message(current)
                 except Exception as error:
                     self.logger.warning("Не удалось закрыть предыдущий опрос: %s", error)
+            await self.refresh_teams("Создан новый опрос.", force=True, rebuild=False)
             poll = new_poll_state(target_date, self.settings.poll_question, self.settings.peer_id)
             sent_message = await self.api.send_message(
                 self.settings.peer_id,
@@ -313,6 +406,9 @@ class PollService:
                     if removed is None:
                         answer = "У вас пока нет голоса"
                     else:
+                        self.save()
+                        if removed.get("choice") == "yes":
+                            await self.refresh_teams(f"{name} отменил «ДА» и больше не в составе.")
                         await self._send_threshold_events(poll)
                         self.save()
                         await self._refresh_poll_message(poll)
@@ -325,6 +421,9 @@ class PollService:
                     )
                 else:
                     set_vote(poll, user_id, name, choice)
+                    self.save()
+                    if choice == "yes":
+                        await self.refresh_teams(f"{name} добавился в состав.")
                     await self._send_threshold_events(poll)
                     self.save()
                     await self._refresh_poll_message(poll)
@@ -339,6 +438,25 @@ class PollService:
     async def handle_outgoing_message(self, event: dict) -> None:
         obj = event.get("object", {})
         message = obj.get("message", obj)
+        distribution = self.state.get("team_distribution")
+        if distribution and int(message.get("peer_id", 0)) == self.settings.peer_id and (
+            (distribution.get("random_id") and
+             int(message.get("random_id", 0)) == distribution["random_id"])
+            or (not message.get("random_id") and not distribution.get("message_id")
+                and not distribution.get("conversation_message_id")
+                and str(message.get("text", "")) == distribution["text"])
+        ):
+            async with self.lock:
+                distribution["message_id"] = int(message.get("id", 0))
+                distribution["conversation_message_id"] = int(
+                    message.get("conversation_message_id", 0)
+                )
+                self.save()
+                if distribution.get("invalidated"):
+                    await self.refresh_teams(
+                        distribution["reason"], force=True, rebuild=distribution["rebuild"],
+                    )
+            return
         poll = self.poll
         if not poll:
             return
@@ -361,6 +479,8 @@ class PollService:
                 await self._send(self.settings.peer_id, "Сейчас нет открытого опроса.")
                 return
             add_manual_vote(poll, label, user_id, user_name, self.now())
+            self.save()
+            await self.refresh_teams(f"Добавлен приглашённый: {label}.")
             await self._send_threshold_events(poll)
             self.save()
             await self._refresh_poll_message(poll)
@@ -379,6 +499,8 @@ class PollService:
             if removed is None:
                 await self._send(self.settings.peer_id, "Подходящий виртуальный голос не найден.")
                 return
+            self.save()
+            await self.refresh_teams(f"Удалён приглашённый: {removed['label']}.")
             await self._send_threshold_events(poll)
             self.save()
             await self._refresh_poll_message(poll)
@@ -392,6 +514,7 @@ class PollService:
             poll = self.poll
             if not poll or not poll.get("is_open"):
                 return
+            record_closed_poll(self.state, poll)
             poll["is_open"] = False
             self.save()
             try:
@@ -501,6 +624,102 @@ class PollService:
         await self._reschedule()
         return f"Дни изменены: {args[0]} — {','.join(days)}"
 
+    async def player_command(
+        self, command: str, args: list[str], peer_id: int, *, raise_api_errors: bool = False
+    ) -> None:
+        try:
+            if command == "/players" and args == ["sync"]:
+                members = await self.api.conversation_members(self.settings.peer_id)
+                async with self.lock:
+                    players = self.state["players"]
+                    for key, name in members.items():
+                        players.setdefault(key, {"rating": None})["name"] = name
+                    self.save()
+                    await self.refresh_teams("Обновлены имена игроков в справочнике.")
+                await self._send(peer_id, f"Обновлено участников беседы: {len(members)}.")
+            elif command == "/players" and args:
+                raise ValueError("Формат: /players или /players sync")
+            elif command == "/alias":
+                query, separator, alias = " ".join(args).partition("|")
+                if not separator or not query.strip() or not alias.strip():
+                    raise ValueError("Формат: /alias VK_ID или ФИО | дополнительное имя")
+                async with self.lock:
+                    key = add_alias(self.state["players"], query.strip(), alias.strip())
+                    self.save()
+                    await self.refresh_teams("Антон обновил дополнительные имена игроков.")
+                await self._send(
+                    peer_id,
+                    f"Имя «{alias.strip()}» привязано к {self.state['players'][key]['name']}",
+                )
+                return
+            elif command in {"/rating", "/position"}:
+                if len(args) < 2:
+                    raise ValueError("Формат: /rating ФИО 7 или /position ФИО полевой|вратарь")
+                if command == "/rating":
+                    rating = parse_rating(args[-1])
+                else:
+                    position = {"полевой": "field", "вратарь": "goalkeeper"}.get(args[-1].lower())
+                    if position is None:
+                        raise ValueError("Роль: полевой или вратарь")
+                query = " ".join(args[:-1])
+                async with self.lock:
+                    players = self.state["players"]
+                    try:
+                        key = find_player(players, query)
+                    except ValueError:
+                        # Named guests may be registered without a VK account.
+                        if query.isdigit() or any(
+                            any(name_key(name) == name_key(query)
+                                for name in [p["name"], *p.get("aliases", [])])
+                            for p in players.values()
+                        ):
+                            raise
+                        key = "guest:" + name_key(query)
+                        players[key] = {"name": query}
+                    if command == "/rating":
+                        if players[key].get("position") == "goalkeeper":
+                            raise ValueError(
+                                "Вратарей пока не оцениваем. Рейтинг только для полевых."
+                            )
+                        players[key]["position"] = "field"
+                        players[key]["rating"] = rating
+                    else:
+                        players[key]["position"] = position
+                        if position == "goalkeeper":
+                            players[key]["rating"] = None
+                    self.save()
+                    reason = (
+                        f"Антон изменил рейтинг игрока {players[key]['name']}."
+                        if command == "/rating" else
+                        f"Антон изменил роль игрока {players[key]['name']}."
+                    )
+                    await self.refresh_teams(reason)
+                value = format_rating(rating) if command == "/rating" else args[-1].lower()
+                await self._send(peer_id, f"Сохранено: {players[key]['name']} — {value}")
+                return
+            lines = ["⚽ РЕЙТИНГ ИГРОКОВ", "", "Рейтинг │ ФИО", "────────────────────"]
+            for player in sorted(
+                self.state["players"].values(),
+                key=lambda p: (
+                    p.get("position") == "goalkeeper",
+                    p.get("rating") is None,
+                    -(p.get("rating") or 0),
+                    name_key(p["name"]),
+                ),
+            ):
+                lines.append(player_row(player))
+            chunk = ""
+            for line in lines:
+                if len(chunk) + len(line) > 3500:
+                    await self._send(peer_id, chunk.rstrip())
+                    chunk = ""
+                chunk += line + "\n"
+            await self._send(peer_id, chunk.rstrip())
+        except (ValueError, VkApiError) as error:
+            if raise_api_errors and isinstance(error, VkApiError):
+                raise
+            await self._send(peer_id, f"Не удалось: {error}")
+
     async def handle_message_event(self, event: dict) -> None:
         message = event.get("object", {}).get("message", {})
         peer_id = int(message.get("peer_id", 0))
@@ -524,6 +743,47 @@ class PollService:
             self.pending_announcements.discard(user_id)
             await self._send(peer_id, "Ввод объявления отменён.")
             return
+        if command in {"/players", "/rating", "/position", "/alias"}:
+            if peer_id not in {user_id, self.settings.peer_id}:
+                return
+            if command == "/players" and not args and peer_id == self.settings.peer_id:
+                try:
+                    await self.player_command(command, args, user_id, raise_api_errors=True)
+                except VkApiError as error:
+                    self.logger.warning(
+                        "Не удалось отправить рейтинг user_id=%s: %s", user_id, error
+                    )
+                    if error.code in {900, 901, 902}:
+                        await self._send(
+                            peer_id,
+                            "Не удалось отправить рейтинг в личку. Откройте сообщения бота: "
+                            f"https://vk.me/club{self.settings.group_id} "
+                            "— разрешите сообщения и напишите /players.",
+                        )
+                    else:
+                        await self._send(peer_id, "Не удалось отправить рейтинг. Попробуйте позже.")
+                else:
+                    await self._send(peer_id, "Рейтинг отправлен в личные сообщения.")
+                return
+            if (command == "/players" and not args) or self.can_edit_ratings(user_id):
+                await self.player_command(command, args, peer_id)
+            else:
+                await self._send(
+                    peer_id, "Изменять игроков и рейтинги может только владелец рейтинга — Антон."
+                )
+            return
+        if command == "/stats" and (
+            peer_id == self.settings.peer_id or (peer_id == user_id and self.is_admin(user_id))
+        ):
+            result = statistics_text(self.state)
+            chunk = ""
+            for line in result.splitlines():
+                if len(chunk) + len(line) > 3500:
+                    await self._send(peer_id, chunk.rstrip())
+                    chunk = ""
+                chunk += line + "\n"
+            await self._send(peer_id, chunk.rstrip())
+            return
         if peer_id != self.settings.peer_id:
             if command in {"/start", "/help"} and self.is_admin(user_id):
                 await self._send(
@@ -539,7 +799,10 @@ class PollService:
         if command in {"/start", "/help"}:
             await self._send(
                 peer_id,
-                "Команды: /poll, /status, /close, /plus1, /minus1, /settime, /setdays, /where",
+                "Команды: /poll, /status, /close, /plus1, /minus1, /settime, /setdays, /where, "
+                "/teams (админ), /stats. Рейтинги в беседе или личке: /players; "
+                "только для Антона: /players sync, /rating, "
+                "/position, /alias",
             )
             return
         if command == "/status":
@@ -550,6 +813,31 @@ class PollService:
                     peer_id,
                     format_status(self.poll, self.settings.yes_threshold, detailed=True),
                 )
+            return
+        if command == "/teams" and self.is_admin(user_id):
+            async with self.lock:
+                if self.poll is None:
+                    await self._send(peer_id, "Активного опроса нет.")
+                else:
+                    distribution = self.state.get("team_distribution")
+                    if distribution:
+                        if not distribution.get("invalidated") and (
+                            self.team_snapshot(self.poll) == distribution["snapshot"]
+                        ):
+                            await self._send(
+                                peer_id, "Команды уже распределены. Составы актуальны."
+                            )
+                        else:
+                            await self.refresh_teams("Состав или рейтинги изменились.")
+                        return
+                    try:
+                        result = teams_text(self.poll, self.state["players"])
+                    except ValueError as error:
+                        result = str(error)
+                    if result.startswith("⚽ КОМАНДА"):
+                        await self.publish_teams(self.poll, result)
+                    else:
+                        await self._send(peer_id, result)
             return
         if command == "/poll" and self.is_admin(user_id):
             created = await self.create_poll(force=False)

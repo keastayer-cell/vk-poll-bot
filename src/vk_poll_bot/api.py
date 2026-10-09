@@ -131,6 +131,27 @@ class VkApiClient:
             cmid=cmid or None,
         )
 
+    async def delete_message(
+        self, peer_id: int, *, message_id: int = 0, conversation_message_id: int = 0
+    ) -> None:
+        if not (message_id or conversation_message_id):
+            raise ValueError("Нет ID сообщения для удаления")
+        response = await self.call(
+            "messages.delete", peer_id=peer_id, group_id=self.group_id,
+            message_ids=str(message_id) if message_id else None,
+            cmids=str(conversation_message_id) if not message_id else None,
+            delete_for_all=1,
+        )
+        deleted = (
+            all(item.get("response") == 1 for item in response) if isinstance(response, list)
+            else all(value == 1 for value in response.values()) if isinstance(response, dict)
+            else response == 1
+        )
+        if not response or not deleted:
+            raise VkApiError("messages.delete", {
+                "error_code": 0, "error_msg": "VK не подтвердил удаление сообщения",
+            })
+
     async def unpin_message(self, peer_id: int) -> None:
         await self.call("messages.unpin", peer_id=peer_id, group_id=self.group_id)
 
@@ -153,6 +174,32 @@ class VkApiClient:
             " ".join(part for part in (user.get("first_name"), user.get("last_name")) if part)
             or f"id{user_id}"
         )
+
+    async def conversation_members(self, peer_id: int) -> dict[str, str]:
+        members = {}
+        offset = 0
+        while True:
+            response = await self.call(
+                "messages.getConversationMembers", peer_id=peer_id,
+                group_id=self.group_id, extended=1, offset=offset, count=200,
+            )
+            profiles = {int(p["id"]): p for p in response.get("profiles", [])}
+            items = response["items"]
+            for item in items:
+                user_id = int(item["member_id"])
+                if user_id <= 0:
+                    continue
+                profile = profiles.get(user_id, {})
+                name = " ".join(
+                    part for part in (profile.get("first_name"), profile.get("last_name"))
+                    if part
+                )
+                members[str(user_id)] = name or await self.user_name(user_id)
+            offset += len(items)
+            if offset >= response["count"]:
+                return members
+            if not items:
+                raise ValueError("VK вернул неполный список участников")
 
 
 class BotsLongPoll:

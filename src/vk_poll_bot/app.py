@@ -10,7 +10,7 @@ from .api import BotsLongPoll, VkApiClient
 from .config import load_settings
 from .scheduling import ScheduleManager
 from .service import PollService
-from .storage import JsonStateRepository
+from .storage import JsonStateRepository, import_player_registry
 
 
 def configure_logging(data_dir: Path) -> logging.Logger:
@@ -37,6 +37,10 @@ async def run(base_dir: Path, *, check: bool = False) -> None:
     logger = configure_logging(settings.data_dir)
     api = VkApiClient(settings.group_token, settings.group_id, settings.api_version)
     repository = JsonStateRepository(settings.data_dir / "state.json")
+    if not check:
+        imported = import_player_registry(repository, settings.data_dir / "players.json")
+        if imported:
+            logger.info("Подключён подготовленный справочник: %s игроков", imported)
     service = PollService(api, settings, repository, logger)
     scheduler = ScheduleManager(service, settings.timezone, logger)
     service.reschedule_callback = scheduler.reschedule

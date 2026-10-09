@@ -69,6 +69,7 @@ class Settings:
     remind_thu_minute: int
     data_dir: Path
     enable_scheduler: bool
+    rating_owner_id: int = 550539899
 
     @property
     def initial_schedule(self) -> dict:

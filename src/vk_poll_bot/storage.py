@@ -6,6 +6,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from .ratings import valid_rating
+
 
 class JsonStateRepository:
     def __init__(self, path: str | Path):
@@ -58,3 +60,27 @@ class JsonStateRepository:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+
+def import_player_registry(repository: JsonStateRepository, source: Path) -> int:
+    """Import the prepared roster once, preserving the production poll and statistics."""
+    if not source.exists():
+        return 0
+    state = repository.load()
+    if state.get("players"):
+        return 0
+    players = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(players, dict) or not players:
+        raise ValueError("Подготовленный справочник должен содержать игроков")
+    for key, player in players.items():
+        if not isinstance(player, dict) or not isinstance(player.get("name"), str):
+            raise ValueError(f"Некорректный игрок: {key}")
+        position = player.get("position")
+        if position not in {"field", "goalkeeper"} or (
+            position == "field" and not valid_rating(player.get("rating"))
+        ) or (position == "goalkeeper" and player.get("rating") is not None):
+            raise ValueError(f"Некорректные роль или рейтинг: {key}")
+    state["players"] = players
+    repository.save(state)
+    source.rename(source.with_name(source.name + ".imported"))
+    return len(players)
