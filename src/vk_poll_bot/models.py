@@ -68,6 +68,7 @@ def normalize_state(data: Any, default_schedule: dict) -> dict:
         "current_poll": data.get("current_poll"),
         "schedule": {**default_schedule, **data.get("schedule", {})},
         "players": data.get("players", {}),
+        "rating_order": data.get("rating_order", "higher"),
         "attendance": data.get("attendance", {"players": {}, "polls": {}}),
         "team_distribution": data.get("team_distribution"),
     }

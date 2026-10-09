@@ -104,7 +104,16 @@ class PollService:
             roster = sorted(poll_players(poll, self.state["players"]), key=lambda p: p["id"])
         except ValueError:
             return None
-        return {"poll_id": poll["poll_id"], "players": roster}
+        snapshot = {"poll_id": poll["poll_id"], "players": roster}
+        if self.state.get("rating_order") == "lower":
+            snapshot["rating_order"] = "lower"
+        return snapshot
+
+    def render_teams(self, poll: dict) -> str:
+        return teams_text(
+            poll, self.state["players"],
+            lower_is_stronger=self.state.get("rating_order") == "lower",
+        )
 
     async def publish_teams(self, poll: dict, text: str) -> None:
         sent = await self._send(self.settings.peer_id, text)
@@ -124,7 +133,7 @@ class PollService:
         if not distribution:
             if rebuild and self.poll and self.poll.get("teams_requested"):
                 try:
-                    text = teams_text(self.poll, self.state["players"])
+                    text = self.render_teams(self.poll)
                 except ValueError:
                     return
                 if text.startswith("⚽ КОМАНДА"):
@@ -168,7 +177,7 @@ class PollService:
         await self._send(self.settings.peer_id, f"⚠️ {reason}\n{action}")
         if rebuild:
             try:
-                text = teams_text(poll, self.state["players"])
+                text = self.render_teams(poll)
             except ValueError as error:
                 text = str(error)
             if text.startswith("⚽ КОМАНДА"):
@@ -676,9 +685,14 @@ class PollService:
                 return
             elif command in {"/rating", "/position"}:
                 if len(args) < 2:
-                    raise ValueError("Формат: /rating ФИО 7 или /position ФИО полевой|вратарь")
+                    example = "2" if self.state.get("rating_order") == "lower" else "7"
+                    raise ValueError(
+                        f"Формат: /rating ФИО {example} или /position ФИО полевой|вратарь"
+                    )
                 if command == "/rating":
                     rating = parse_rating(args[-1])
+                    if self.state.get("rating_order") == "lower" and rating > 4:
+                        raise ValueError("Рейтинг от 1 до 4: 1 — сильнейшие, 4 — слабейшие")
                 else:
                     position = {"полевой": "field", "вратарь": "goalkeeper"}.get(args[-1].lower())
                     if position is None:
@@ -721,12 +735,16 @@ class PollService:
                 await self._send(peer_id, f"Сохранено: {players[key]['name']} — {value}")
                 return
             lines = ["⚽ РЕЙТИНГ ИГРОКОВ", "", "Рейтинг │ ФИО", "────────────────────"]
+            if self.state.get("rating_order") == "lower":
+                lines.insert(1, "1 — сильнейшие · 4 — слабейшие")
             for player in sorted(
                 self.state["players"].values(),
                 key=lambda p: (
                     p.get("position") == "goalkeeper",
                     p.get("rating") is None,
-                    -(p.get("rating") or 0),
+                    (p.get("rating") or 0) * (
+                        1 if self.state.get("rating_order") == "lower" else -1
+                    ),
                     name_key(p["name"]),
                 ),
             ):
@@ -862,7 +880,7 @@ class PollService:
                             await self.refresh_teams("Состав или рейтинги изменились.")
                         return
                     try:
-                        result = teams_text(self.poll, self.state["players"])
+                        result = self.render_teams(self.poll)
                     except ValueError as error:
                         result = str(error)
                     if result.startswith("⚽ КОМАНДА"):

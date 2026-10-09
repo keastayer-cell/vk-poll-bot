@@ -206,3 +206,25 @@ def test_late_outgoing_ids_finish_invalidated_message_cleanup(tmp_path):
         assert bot.api.deleted == [(bot.settings.peer_id, 0, 42)]
         assert len(team_messages(bot.api)) == 2
     asyncio.run(scenario())
+
+
+def test_lower_rating_scale_survives_restart_and_updates_starters(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path)
+        bot.state['rating_order'] = 'lower'
+        for player in bot.state['players'].values():
+            if player['position'] == 'field':
+                player['rating'] = 2
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        assert restored.state['rating_order'] == 'lower'
+        await message(restored, '/teams')
+        assert restored.state['team_distribution']['snapshot']['rating_order'] == 'lower'
+        await message(restored, '/rating Игрок 3 5')
+        assert restored.state['players']['3']['rating'] == 2
+        await message(restored, '/rating Игрок 3 1')
+        assert restored.state['players']['3']['rating'] == 1
+        text = restored.state['team_distribution']['text']
+        section = next(part for part in text.split('⚽ КОМАНДА') if 'Игрок 3' in part)
+        assert 'Игрок 3' in section.split('Замены\n')[0]
+    asyncio.run(scenario())

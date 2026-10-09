@@ -335,3 +335,26 @@ def test_chat_rating_delivery_failure_does_not_publish_list(tmp_path, code):
         else:
             assert "Попробуйте позже" in text
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('field_count', [9, 11, 13])
+def test_lower_scale_larger_team_is_stronger_and_best_four_start(field_count):
+    import re
+
+    players = {
+        str(i): {'name': f'P{i}', 'position': 'field', 'rating': 1 + i % 4}
+        for i in range(1, field_count + 1)
+    }
+    players.update({str(100 + i): {'name': f'K{i}', 'position': 'goalkeeper', 'rating': None}
+                    for i in range(2)})
+    poll = {'voters': {key: {'name': p['name'], 'choice': 'yes'}
+                       for key, p in players.items()}}
+    text = teams_text(poll, players, lower_is_stronger=True)
+    by_name = {p['name']: p['rating'] for p in players.values()}
+    averages = []
+    for section in text.split('⚽ КОМАНДА')[1:]:
+        names = re.findall(r'│ (P\d+)\b', section)
+        scores = [by_name[name] for name in names]
+        assert scores == sorted(scores)
+        averages.append(sum(scores) / len(scores))
+    assert averages[0] <= min(averages[1:])

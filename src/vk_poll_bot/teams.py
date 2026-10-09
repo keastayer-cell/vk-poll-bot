@@ -182,7 +182,7 @@ def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
     return [[players[i] for i in group] for group in best_groups]
 
 
-def teams_text(poll: dict, players: dict) -> str:
+def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) -> str:
     total = sum(v.get("choice") == "yes" for v in poll.get("voters", {}).values())
     total += len(poll.get("manual_yes_voters", {}))
     if total < 10:
@@ -192,6 +192,18 @@ def teams_text(poll: dict, players: dict) -> str:
     roster = poll_players(poll, players)
     keepers = [p for p in roster if p["position"] == "goalkeeper"]
     fields = [p for p in roster if p["position"] == "field"]
+    if lower_is_stronger:
+        for player in fields:
+            if player["rating"] > 4:
+                raise ValueError(
+                    f"Обновите рейтинг по шкале 1–4: {player['name']}. "
+                    "1 — сильнейшие, 4 — слабейшие."
+                )
+    original_ratings = {p["id"]: p["rating"] for p in fields}
+    if lower_is_stronger:
+        # Negation preserves exact differences and makes lower ratings stronger
+        # for the existing sum, profile and unequal-team balancing rules.
+        fields = [{**p, "rating": -p["rating"]} for p in fields]
     if len(keepers) not in {2, 3} or not 8 <= len(fields) <= 13:
         return ("Нужны 2 или 3 вратаря и от 8 до 13 полевых. "
                 f"Сейчас игроков: {total}, вратарей: {len(keepers)}. Проверьте роли игроков.")
@@ -205,7 +217,10 @@ def teams_text(poll: dict, players: dict) -> str:
         teams = balanced_with_substitutes(fields)
     sections = []
     for number, team in enumerate(teams, 1):
-        ordered = sorted(team, key=lambda p: (-p["rating"], p["name"]))
+        team = [{**p, "rating": original_ratings[p["id"]]} for p in team]
+        ordered = sorted(team, key=lambda p: (
+            p["rating"] if lower_is_stronger else -p["rating"], p["name"]
+        ))
         total_rating = sum(p["rating"] for p in team)
         sections.append(
             f"⚽ КОМАНДА {number} · {len(team)} полевых\n"
