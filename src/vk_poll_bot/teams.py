@@ -4,7 +4,7 @@ from functools import lru_cache
 from itertools import combinations
 from math import lcm
 
-from .ratings import format_rating, valid_rating
+from .ratings import format_rating, rating_units, valid_rating
 from .text_tables import player_row
 
 
@@ -73,6 +73,7 @@ def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
     candidates = []
     minimum_spread = None
     indices = tuple(range(len(players)))
+    units = tuple(rating_units(p["rating"]) for p in players)
     # Fix the first player in each group to avoid permutations of identical partitions.
     for tail in combinations(indices[1:], team_size - 1):
         first = (0,) + tail
@@ -84,15 +85,15 @@ def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
         for second in second_choices:
             third = tuple(i for i in remaining if i not in second)
             groups = [first, second] + ([third] if third else [])
-            totals = [sum(players[i]["rating"] for i in group) for group in groups]
+            totals = [sum(units[i] for i in group) for group in groups]
             spread = max(totals) - min(totals)
             if minimum_spread is None or spread < minimum_spread:
                 minimum_spread = spread
                 candidates = [candidate for candidate in candidates
-                              if candidate[0] <= minimum_spread + 2]
-            if spread > minimum_spread + 2:
+                              if candidate[0] <= minimum_spread + 20]
+            if spread > minimum_spread + 20:
                 continue
-            profiles = [sorted((players[i]["rating"] for i in group), reverse=True)
+            profiles = [sorted((units[i] for i in group), reverse=True)
                         for group in groups]
             # Compare strongest with strongest, second with second, etc. This penalizes
             # concentration of stars/weak players even when the totals happen to match.
@@ -110,12 +111,13 @@ def balanced_five_four_four(players: list[dict]) -> list[list[dict]]:
     if len(players) != 13:
         raise ValueError("Для схемы 5 + 4 + 4 нужны 13 полевых")
     indices = tuple(range(13))
+    units = tuple(rating_units(p["rating"]) for p in players)
     candidates = []
     minimum_spread = None
 
     @lru_cache(maxsize=None)
     def metrics(group):
-        ratings = sorted((players[i]["rating"] for i in group), reverse=True)
+        ratings = sorted((units[i] for i in group), reverse=True)
         # Twenty quantiles compare all players in unequal-sized teams fairly.
         profile = tuple(r for r in ratings for _ in range(20 // len(group)))
         average_scaled = sum(ratings) * (20 // len(group))
@@ -135,9 +137,9 @@ def balanced_five_four_four(players: list[dict]) -> list[list[dict]]:
             spread = max(averages) - min(averages)
             if minimum_spread is None or spread < minimum_spread:
                 minimum_spread = spread
-                candidates = [c for c in candidates if c[0] <= minimum_spread + 10]
+                candidates = [c for c in candidates if c[0] <= minimum_spread + 100]
             # Same half-a-rating-point tolerance as two points per four-player side.
-            if spread > minimum_spread + 10:
+            if spread > minimum_spread + 100:
                 continue
             profile_cost = sum(
                 (values[a][1][rank] - values[b][1][rank]) ** 2
@@ -156,13 +158,14 @@ def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
     small_size = len(players) // 2
     scale = lcm(large_size, small_size)
     indices = tuple(range(len(players)))
+    units = tuple(rating_units(p["rating"]) for p in players)
     candidates = []
     minimum_spread = None
     for large in combinations(indices, large_size):
         small = tuple(i for i in indices if i not in large)
         groups = [large, small]
         profiles = [tuple(r for r in sorted(
-            (players[i]["rating"] for i in group), reverse=True
+            (units[i] for i in group), reverse=True
         ) for _ in range(scale // len(group))) for group in groups]
         averages = [sum(profile) for profile in profiles]
         if averages[0] < averages[1]:
@@ -170,8 +173,8 @@ def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
         spread = averages[0] - averages[1]
         if minimum_spread is None or spread < minimum_spread:
             minimum_spread = spread
-            candidates = [c for c in candidates if c[0] <= minimum_spread + scale / 2]
-        if spread > minimum_spread + scale / 2:
+            candidates = [c for c in candidates if c[0] <= minimum_spread + scale * 5]
+        if spread > minimum_spread + scale * 5:
             continue
         profile_cost = sum((a - b) ** 2 for a, b in zip(*profiles))
         candidates.append((spread, profile_cost, groups))
