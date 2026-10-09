@@ -52,6 +52,33 @@ def test_restore_active_poll_refreshes_and_replaces_pin(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_restore_roster_shows_ratings_keepers_and_guest_aliases(tmp_path) -> None:
+    async def scenario():
+        bot, api = make_service(tmp_path)
+        await bot.create_poll("2026-09-24")
+        bot.poll["show_roster"] = True
+        bot.poll["voters"] = {
+            "20": {"name": "Игрок", "choice": "yes"},
+            "21": {"name": "Вратарь", "choice": "yes"},
+            "22": {"name": "Не идёт", "choice": "no"},
+        }
+        bot.poll["manual_yes_voters"] = {"manual:1": {"label": "Петров"}}
+        bot.state["players"] = {
+            "20": {"name": "Игрок", "position": "field", "rating": 6.4},
+            "21": {"name": "Вратарь", "position": "goalkeeper", "rating": None},
+            "guest:p": {"name": "Николай Петров", "aliases": ["Петров"],
+                        "position": "field", "rating": 7.8},
+        }
+        await bot.restore_active_poll()
+        text = api.edited[-1][3]
+        assert "Игрок │ 6,4" in text
+        assert "Вратарь │ 🧤" in text
+        assert "Петров │ 7,8" in text
+        assert "Не идёт │" not in text
+
+    asyncio.run(scenario())
+
+
 def test_vote_must_be_cancelled_before_voting_again(tmp_path) -> None:
     async def scenario():
         bot, api = make_service(tmp_path)
@@ -164,12 +191,15 @@ def test_admin_can_start_and_close_poll(tmp_path) -> None:
     asyncio.run(scenario())
 
 
-def test_status_matches_telegram_detailed_format(tmp_path) -> None:
+def test_status_includes_ratings_and_unknown_guests(tmp_path) -> None:
     async def scenario():
         bot, api = make_service(tmp_path)
         api.names[20] = "Антон Гагиев"
         await bot.create_poll("2026-09-24")
         bot.poll["voters"]["20"] = {"name": "Антон Гагиев", "choice": "yes"}
+        bot.state["players"]["20"] = {
+            "name": "Антон Гагиев", "position": "field", "rating": 6.4,
+        }
         bot.poll["manual_yes_voters"]["manual:1"] = {
             "label": "Клим",
             "added_by_user_id": 10,
@@ -192,8 +222,8 @@ def test_status_matches_telegram_detailed_format(tmp_path) -> None:
         assert api.sent[-1][1] == (
             "«ДА»: 1 + 1 вручную = 2 / 3\n"
             "«Нет»: 0\n\n"
-            "Реальные «ДА»:\n1. Антон Гагиев\n\n"
-            "Виртуальные +1:\n1. Клим"
+            "Реальные «ДА»:\n1. Антон Гагиев │ 6,4\n\n"
+            "Виртуальные +1:\n1. Клим │ —"
         )
 
     asyncio.run(scenario())

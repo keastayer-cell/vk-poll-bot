@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from .ratings import format_rating, valid_rating
+from .teams import find_player
+
 Choice = Literal["yes", "no"]
 INVISIBLE_CHARACTERS = str.maketrans(
     {"\u200b": None, "\u200c": None, "\u200d": None, "\ufeff": None}
@@ -138,7 +141,25 @@ def evaluate_threshold(state: dict, threshold: int) -> list[Notification]:
     return events
 
 
-def format_status(state: dict, threshold: int, detailed: bool = False) -> str:
+def rated_name(name: str, players: dict, user_id: str | None = None) -> str:
+    if user_id is not None:
+        player = players.get(user_id, {})
+    else:
+        try:
+            player = players[find_player(players, name)]
+        except ValueError:
+            player = {}
+    rating = player.get("rating")
+    label = (
+        "🧤" if player.get("position") == "goalkeeper" else
+        format_rating(rating) if valid_rating(rating) else "—"
+    )
+    return f"{name} │ {label}"
+
+
+def format_status(
+    state: dict, threshold: int, detailed: bool = False, players: dict | None = None
+) -> str:
     result = counts(state)
     header = (
         f"«ДА»: {result.yes} + {result.manual_yes} вручную = "
@@ -146,8 +167,14 @@ def format_status(state: dict, threshold: int, detailed: bool = False) -> str:
     )
     if not detailed:
         return header
-    yes_names = [v["name"] for v in state.get("voters", {}).values() if v["choice"] == "yes"]
-    guest_names = [v["label"] for v in state.get("manual_yes_voters", {}).values()]
+    yes_names = [
+        rated_name(v["name"], players, key) if players is not None else v["name"]
+        for key, v in state.get("voters", {}).items() if v["choice"] == "yes"
+    ]
+    guest_names = [
+        rated_name(v["label"], players) if players is not None else v["label"]
+        for v in state.get("manual_yes_voters", {}).values()
+    ]
     sections = []
     for title, names in (("Реальные «ДА»", yes_names), ("Виртуальные +1", guest_names)):
         if names:

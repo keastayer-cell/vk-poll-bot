@@ -20,6 +20,7 @@ from .votes import (
     evaluate_threshold,
     format_status,
     parse_plus_one,
+    rated_name,
     remove_manual_vote,
     remove_vote,
     set_vote,
@@ -191,11 +192,14 @@ class PollService:
         result = counts(poll)
         if poll.get("show_roster"):
             yes_names = [
-                voter["name"]
-                for voter in poll.get("voters", {}).values()
+                rated_name(voter["name"], self.state["players"], key)
+                for key, voter in poll.get("voters", {}).items()
                 if voter.get("choice") == "yes"
             ]
-            guest_names = [vote["label"] for vote in poll.get("manual_yes_voters", {}).values()]
+            guest_names = [
+                rated_name(vote["label"], self.state["players"])
+                for vote in poll.get("manual_yes_voters", {}).values()
+            ]
             no_names = [
                 voter["name"]
                 for voter in poll.get("voters", {}).values()
@@ -694,6 +698,7 @@ class PollService:
                         f"Антон изменил роль игрока {players[key]['name']}."
                     )
                     await self.refresh_teams(reason)
+                    await self._refresh_poll_message()
                 value = format_rating(rating) if command == "/rating" else args[-1].lower()
                 await self._send(peer_id, f"Сохранено: {players[key]['name']} — {value}")
                 return
@@ -811,7 +816,10 @@ class PollService:
             else:
                 await self._send(
                     peer_id,
-                    format_status(self.poll, self.settings.yes_threshold, detailed=True),
+                    format_status(
+                        self.poll, self.settings.yes_threshold, detailed=True,
+                        players=self.state["players"],
+                    ),
                 )
             return
         if command == "/teams" and self.is_admin(user_id):
