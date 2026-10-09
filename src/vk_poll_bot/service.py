@@ -8,7 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .api import VkApiError
-from .attendance import record_closed_poll, statistics_text
+from .attendance import poll_counts_for_attendance, record_closed_poll, statistics_text
 from .keyboards import decode_payload, poll_keyboard
 from .models import new_poll_state, normalize_state
 from .ratings import format_rating, parse_rating
@@ -513,6 +513,10 @@ class PollService:
             )
 
     async def _archive_closed_poll(self, poll: dict) -> bool:
+        if not poll_counts_for_attendance(self.state, poll):
+            poll["is_open"] = False
+            self.save()
+            return True
         try:
             members = await self.api.conversation_members(int(poll["peer_id"]))
         except Exception as error:

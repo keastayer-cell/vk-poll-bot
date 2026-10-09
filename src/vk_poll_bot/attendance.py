@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 
+def poll_counts_for_attendance(state: dict, poll: dict) -> bool:
+    start_date = state.get("attendance", {}).get("start_date")
+    return not start_date or poll.get("poll_date", "") >= start_date
+
+
 def record_closed_poll(state: dict, poll: dict, members: dict | None = None) -> bool:
     if poll.get("is_open"):
         raise ValueError("Статистика считается только после закрытия опроса")
+    if not poll_counts_for_attendance(state, poll):
+        return False
     attendance = state.setdefault("attendance", {"players": {}, "polls": {}})
     poll_id = poll["poll_id"]
     if poll_id in attendance["polls"]:
@@ -38,7 +45,14 @@ def record_closed_poll(state: dict, poll: dict, members: dict | None = None) -> 
 
 def statistics_text(state: dict) -> str:
     attendance = state.get("attendance", {"players": {}, "polls": {}})
+    start_date = attendance.get("start_date")
+    start_text = ".".join(reversed(start_date.split("-"))) if start_date else ""
     if not attendance["polls"]:
+        if start_date:
+            return (
+                f"Статистика пока пустая. Учитываем опросы с {start_text}, "
+                "только после закрытия. Более ранние тестовые опросы не учитываются."
+            )
         return "Статистика пока пустая. Она появится после закрытия опроса."
     rows = []
     for key, entry in attendance["players"].items():
@@ -50,6 +64,8 @@ def statistics_text(state: dict) -> str:
               for i, title in enumerate(("ДА", "НЕТ"))]
     lines = ["📊 СТАТИСТИКА ТРЕНИРОВОК", f"Закрытых опросов: {len(attendance['polls'])}", "",
              "ДА │ НЕТ │ ФИО", "────────────────────"]
+    if start_date:
+        lines.insert(1, f"Учёт с {start_text}")
     lines += [" │ ".join(
         "\u2007" * (widths[i] - len(str(row[i]))) + str(row[i]) for i in range(2)
     ) + f" │ {row[2]}" for row in rows]

@@ -126,3 +126,24 @@ def test_member_fetch_failure_leaves_poll_open_without_partial_statistics(tmp_pa
         assert not await bot.create_poll('2026-10-10')
         assert bot.poll['poll_date'] == '2026-10-09'
     asyncio.run(scenario())
+
+
+def test_statistics_start_date_excludes_test_even_when_closed_later(tmp_path):
+    async def scenario():
+        bot = PollService(FakeApi(), make_settings(tmp_path),
+                          JsonStateRepository(tmp_path / 'state.json'))
+        bot.state['attendance']['start_date'] = '2026-10-12'
+        await bot.create_poll('2026-10-09')
+        bot.poll['voters'] = {'20': {'name': 'Игрок', 'choice': 'yes'}}
+        await bot.close_poll()
+        assert not bot.state['attendance']['players']
+        assert not bot.state['attendance']['polls']
+        assert '12.10.2026' in statistics_text(bot.state)
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        assert restored.state['attendance']['start_date'] == '2026-10-12'
+        await restored.create_poll('2026-10-12')
+        restored.poll['voters'] = {'20': {'name': 'Игрок', 'choice': 'yes'}}
+        await restored.close_poll()
+        assert restored.state['attendance']['players']['20']['yes_count'] == 1
+        assert len(restored.state['attendance']['polls']) == 1
+    asyncio.run(scenario())
