@@ -910,7 +910,7 @@ class PollService:
         if command == "/plus1" and self.is_admin(user_id):
             await self.add_guest(" ".join(args) or f"Гость от {user_name}", user_id, user_name)
             return
-        if (command == "/minus1" or text == "-1") and self.is_admin(user_id):
+        if command in {"/minus1", "-1"} and self.is_admin(user_id):
             await self.remove_guest(" ".join(args))
             return
         guest_name = parse_plus_one(text, user_name)

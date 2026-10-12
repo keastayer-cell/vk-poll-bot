@@ -123,7 +123,10 @@ def test_no_votes_and_roster_button_do_not_invalidate_teams(tmp_path):
     asyncio.run(scenario())
 
 
-def test_guest_without_rating_clears_teams_and_setting_rating_rebuilds(tmp_path):
+@pytest.mark.parametrize("remove_command", [
+    "/minus1 Новый Гость", "-1 Новый Гость", "-1   новый\tгость", "/minus1", "-1",
+])
+def test_guest_without_rating_clears_teams_and_setting_rating_rebuilds(tmp_path, remove_command):
     async def scenario():
         bot = make_bot(tmp_path, total=10)
         await message(bot, "/teams")
@@ -132,7 +135,11 @@ def test_guest_without_rating_clears_teams_and_setting_rating_rebuilds(tmp_path)
         assert bot.state["team_distribution"] is None
         await message(bot, "/rating Новый Гость 6,5", private=True)
         assert len(team_messages(bot.api)) == 2
-        await message(bot, "/minus1 Новый Гость")
+        await message(bot, remove_command, user=99)
+        assert len(bot.api.deleted) == 1
+        assert len(bot.poll["manual_yes_voters"]) == 1
+        await message(bot, remove_command)
+        assert not bot.poll["manual_yes_voters"]
         assert len(bot.api.deleted) == 2
         assert len(team_messages(bot.api)) == 3
         assert "Новый Гость" not in bot.state["team_distribution"]["text"]
