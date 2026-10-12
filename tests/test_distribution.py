@@ -9,12 +9,12 @@ from vk_poll_bot.service import PollService
 from vk_poll_bot.storage import JsonStateRepository
 
 
-def make_bot(tmp_path, total=11, api=None):
+def make_bot(tmp_path, total=11, api=None, keepers=2):
     bot = PollService(api or FakeApi(), make_settings(tmp_path),
                       JsonStateRepository(tmp_path / "state.json"))
     bot.state["players"] = {
-        str(i): {"name": f"Игрок {i}", "rating": 6 if i > 2 else None,
-                 "position": "field" if i > 2 else "goalkeeper"}
+        str(i): {"name": f"Игрок {i}", "rating": 6 if i > keepers else None,
+                 "position": "field" if i > keepers else "goalkeeper"}
         for i in range(1, total + 1)
     }
     poll = new_poll_state(bot.now().strftime("%Y-%m-%d"), "Идете?", bot.settings.peer_id)
@@ -43,9 +43,10 @@ def team_messages(api):
     return [text for _, text, _ in api.sent if text.startswith("⚽ КОМАНДА")]
 
 
-def test_repeat_and_restart_do_not_duplicate_teams(tmp_path):
+@pytest.mark.parametrize("keepers", [0, 1, 2])
+def test_repeat_and_restart_do_not_duplicate_teams(tmp_path, keepers):
     async def scenario():
-        bot = make_bot(tmp_path)
+        bot = make_bot(tmp_path, keepers=keepers)
         await message(bot, "/teams")
         original = bot.state["team_distribution"]
         restored = PollService(bot.api, bot.settings, bot.repository)

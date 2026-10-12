@@ -1,7 +1,11 @@
 import pytest
 
 from vk_poll_bot.ratings import format_rating, parse_rating, rating_units, valid_rating
-from vk_poll_bot.teams import balanced_five_four_four, balanced_with_substitutes, poll_players
+from vk_poll_bot.teams import (
+    balanced_three_with_substitutes,
+    balanced_with_substitutes,
+    poll_players,
+)
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -27,7 +31,7 @@ def test_half_ratings_are_preserved_in_poll_and_balancing():
                 "position": "field"} for i in range(13)]
     poll = {"voters": {"0": {"name": "0", "choice": "yes"}}}
     assert poll_players(poll, {"0": players[0]})[0]["rating"] == 6.5
-    teams = balanced_five_four_four(players)
+    teams = balanced_three_with_substitutes(players)
     assert sorted(p["rating"] for t in teams for p in t) == sorted(p["rating"] for p in players)
     assert all(sum(p["rating"] for p in teams[0]) * 4 >= sum(p["rating"] for p in t) * 5
                for t in teams[1:])
@@ -45,7 +49,8 @@ def test_all_tenths_are_valid_and_round_trip_exactly():
 def test_unequal_teams_balance_decimal_ratings_without_float_comparisons(size):
     ratings = [6.4, 5.3, 7.1, 2.2, 8.8, 4.9, 6.7, 7.6, 3.1, 5.8, 9.3, 6.1, 4.4]
     players = [{"id": str(i), "rating": rating} for i, rating in enumerate(ratings[:size])]
-    teams = (balanced_five_four_four(players) if size == 13 else balanced_with_substitutes(players))
+    teams = (balanced_three_with_substitutes(players)
+             if size == 13 else balanced_with_substitutes(players))
     assert sorted(p["id"] for t in teams for p in t) == sorted(p["id"] for p in players)
     totals = [sum(rating_units(p["rating"]) for p in t) for t in teams]
     assert all(totals[0] * len(t) >= totals[i] * len(teams[0])

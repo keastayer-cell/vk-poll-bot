@@ -107,10 +107,10 @@ def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
     return [[players[i] for i in group] for group in best_groups]
 
 
-def balanced_five_four_four(players: list[dict]) -> list[list[dict]]:
-    if len(players) != 13:
-        raise ValueError("Для схемы 5 + 4 + 4 нужны 13 полевых")
-    indices = tuple(range(13))
+def balanced_three_with_substitutes(players: list[dict]) -> list[list[dict]]:
+    if len(players) not in {13, 14}:
+        raise ValueError("Для трёх неравных составов нужны 13 или 14 полевых")
+    indices = tuple(range(len(players)))
     units = tuple(rating_units(p["rating"]) for p in players)
     candidates = []
     minimum_spread = None
@@ -125,14 +125,22 @@ def balanced_five_four_four(players: list[dict]) -> list[list[dict]]:
 
     for five in combinations(indices, 5):
         remaining = tuple(i for i in indices if i not in five)
-        for tail in combinations(remaining[1:], 3):
-            first_four = (remaining[0],) + tail
-            second_four = tuple(i for i in remaining if i not in first_four)
-            groups = [five, first_four, second_four]
+        second_choices = (
+            [(remaining[0],) + tail for tail in combinations(remaining[1:], 3)]
+            if len(players) == 13 else combinations(remaining, 5)
+        )
+        for second in second_choices:
+            # The two five-player squads are interchangeable.
+            if len(players) == 14 and five[0] > second[0]:
+                continue
+            third = tuple(i for i in remaining if i not in second)
+            groups = [five, second, third]
             values = [metrics(group) for group in groups]
             averages = [value[0] for value in values]
-            # The five-player side must also be at least as strong per player.
-            if averages[0] < max(averages[1:]):
+            # Every larger squad must also be at least as strong per player.
+            if any(averages[a] < averages[b]
+                   for a in range(3) for b in range(3)
+                   if len(groups[a]) > len(groups[b])):
                 continue
             spread = max(averages) - min(averages)
             if minimum_spread is None or spread < minimum_spread:
@@ -204,14 +212,15 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         # Negation preserves exact differences and makes lower ratings stronger
         # for the existing sum, profile and unequal-team balancing rules.
         fields = [{**p, "rating": -p["rating"]} for p in fields]
-    if len(keepers) not in {2, 3} or not 8 <= len(fields) <= 13:
-        return ("Нужны 2 или 3 вратаря и от 8 до 13 полевых. "
-                f"Сейчас игроков: {total}, вратарей: {len(keepers)}. Проверьте роли игроков.")
-    if len(fields) == 13:
-        teams = balanced_five_four_four(fields)
+    if not 8 <= len(fields) <= 15:
+        return ("Нужны от 8 до 15 полевых. "
+                f"Сейчас игроков: {total}, полевых: {len(fields)}, "
+                f"вратарей: {len(keepers)}. Проверьте роли игроков.")
+    if len(fields) in {13, 14}:
+        teams = balanced_three_with_substitutes(fields)
     elif len(fields) in {8, 12}:
         teams = balanced_teams(fields, team_size=4)
-    elif len(fields) == 10:
+    elif len(fields) in {10, 15}:
         teams = balanced_teams(fields, team_size=5)
     else:
         teams = balanced_with_substitutes(fields)
@@ -233,6 +242,9 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
             ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[4:])
              if len(ordered) > 4 else "")
         )
-    sections.append("🧤 Вратари (распределите сами):\n" +
-                    "\n".join(player_row(p) for p in keepers))
+    if keepers:
+        sections.append("🧤 Вратари (распределите сами):\n" +
+                        "\n".join(player_row(p) for p in keepers))
+    else:
+        sections.append("🧤 Вратари не записались. Кто встанет в ворота — решите сами.")
     return "\n\n".join(sections)

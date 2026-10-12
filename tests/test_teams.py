@@ -9,8 +9,8 @@ from vk_poll_bot.service import PollService
 from vk_poll_bot.storage import JsonStateRepository
 from vk_poll_bot.teams import (
     add_alias,
-    balanced_five_four_four,
     balanced_teams,
+    balanced_three_with_substitutes,
     balanced_with_substitutes,
     find_player,
     poll_players,
@@ -76,7 +76,7 @@ def test_three_teams_share_stars_and_weak_players():
 ])
 def test_thirteen_field_players_five_is_stronger_without_duplicates(ratings):
     players = [{"id": str(i), "name": str(i), "rating": r} for i, r in enumerate(ratings)]
-    teams = balanced_five_four_four(players)
+    teams = balanced_three_with_substitutes(players)
     assert [len(t) for t in teams] == [5, 4, 4]
     assert sorted(p["id"] for t in teams for p in t) == sorted(p["id"] for p in players)
     totals = [sum(p["rating"] for p in team) for team in teams]
@@ -151,7 +151,12 @@ def test_goalkeepers_excluded_and_positions_required(total):
     with pytest.raises(ValueError, match="Не задана роль"):
         teams_text(poll, directory)
     directory["0"].update(position="goalkeeper", rating=None)
-    assert "Проверьте роли" in teams_text(poll, directory)
+    output = teams_text(poll, directory)
+    if total == 10:
+        assert "Проверьте роли" in output
+    else:
+        assert output.count("⚽ КОМАНДА") == 2
+        assert "│ Игрок 0" in output.split("Вратари (распределите сами):")[1]
 
 
 @pytest.mark.parametrize("size", [9, 16])
@@ -161,6 +166,10 @@ def test_unresolved_player_counts(size):
 
 
 @pytest.mark.parametrize("total,keepers,sizes", [
+    (10, 0, [5, 5]), (11, 0, [6, 5]), (12, 0, [4, 4, 4]),
+    (13, 0, [5, 4, 4]), (14, 0, [5, 5, 4]), (15, 0, [5, 5, 5]),
+    (10, 1, [5, 4]), (11, 1, [5, 5]), (12, 1, [6, 5]),
+    (13, 1, [4, 4, 4]), (14, 1, [5, 4, 4]), (15, 1, [5, 5, 4]),
     (10, 2, [4, 4]), (11, 2, [5, 4]), (12, 2, [5, 5]),
     (13, 2, [6, 5]), (14, 2, [4, 4, 4]), (15, 2, [5, 4, 4]),
     (11, 3, [4, 4]), (12, 3, [5, 4]), (13, 3, [5, 5]),
@@ -178,9 +187,21 @@ def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, siz
     for number, size in enumerate(sizes, 1):
         assert f"КОМАНДА {number} · {size} полевых\nНа поле: 4 · Замены: {size - 4}" in output
     fields, keeper_text = output.split("🧤 Вратари")
+    if not keepers:
+        assert "не записались" in keeper_text
     for i in range(total):
         assert (fields if i < total - keepers else keeper_text).count(f"│ Игрок {i}\n") == 1 \
             or (fields if i < total - keepers else keeper_text).endswith(f"│ Игрок {i}")
+
+
+@pytest.mark.parametrize("ratings", [[1, 2, 3, 4] * 3 + [1, 4], [2] * 14])
+def test_fourteen_fields_balance_profiles_and_keep_larger_squads_stronger(ratings):
+    players = [{"id": str(i), "rating": -r} for i, r in enumerate(ratings)]
+    teams = balanced_three_with_substitutes(players)
+    assert [len(t) for t in teams] == [5, 5, 4]
+    assert sorted(p["id"] for t in teams for p in t) == sorted(p["id"] for p in players)
+    averages = [sum(p["rating"] for p in t) / len(t) for t in teams]
+    assert min(averages[:2]) >= averages[2]
 
 
 @pytest.mark.parametrize("ratings", [
