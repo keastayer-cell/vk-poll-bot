@@ -25,6 +25,58 @@ def find_player(players: dict, query: str) -> str:
     return matches[0]
 
 
+def matching_guests(players: dict, name: str) -> list[str]:
+    """Only full, explicitly stored names may identify a guest automatically."""
+    normalized = name_key(name)
+    if len(normalized.split()) < 2:
+        return []
+    return [key for key, player in players.items() if key.startswith("guest:") and any(
+        name_key(value) == normalized
+        for value in [player["name"], *player.get("aliases", [])]
+    )]
+
+
+def link_guest_players(players: dict, members: dict[str, str]) -> list[str]:
+    """Move unambiguous guest identities to verified conversation members' VK IDs."""
+    linked = []
+    members = {key: name for key, name in members.items() if key.isdigit() and int(key) > 0}
+    for user_id, name in members.items():
+        guests = matching_guests(players, name)
+        if len(guests) != 1:
+            continue
+        guest = players[guests[0]]
+        full_names = {name_key(value) for value in [guest["name"], *guest.get("aliases", [])]
+                      if len(name_key(value).split()) >= 2}
+        if sum(name_key(value) in full_names for value in members.values()) != 1:
+            continue
+        if any(key.isdigit() and key != user_id and any(
+            name_key(value) in full_names
+            for value in [player["name"], *player.get("aliases", [])]
+        ) for key, player in players.items()):
+            continue
+        existing = players.get(user_id, {})
+        if (existing.get("position") and guest.get("position")
+                and existing["position"] != guest["position"]):
+            continue
+        if (existing.get("rating") is not None and guest.get("rating") is not None
+                and existing["rating"] != guest["rating"]):
+            continue
+        merged = {**guest, **existing, "name": name}
+        if existing.get("rating") is None:
+            merged["rating"] = guest.get("rating")
+        if not existing.get("position") and guest.get("position"):
+            merged["position"] = guest["position"]
+        aliases = [*guest.get("aliases", []), guest["name"],
+                   *existing.get("aliases", [])]
+        if existing.get("name"):
+            aliases.append(existing["name"])
+        merged["aliases"] = list(dict.fromkeys(alias for alias in aliases if alias != name))
+        players[user_id] = merged
+        del players[guests[0]]
+        linked.append(user_id)
+    return linked
+
+
 def add_alias(players: dict, query: str, alias: str) -> str:
     key = find_player(players, query)
     alias = " ".join(alias.split())

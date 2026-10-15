@@ -12,7 +12,15 @@ from .attendance import poll_counts_for_attendance, record_closed_poll, statisti
 from .keyboards import decode_payload, poll_keyboard
 from .models import new_poll_state, normalize_state
 from .ratings import format_rating, parse_rating
-from .teams import add_alias, find_player, name_key, poll_players, teams_text
+from .teams import (
+    add_alias,
+    find_player,
+    link_guest_players,
+    matching_guests,
+    name_key,
+    poll_players,
+    teams_text,
+)
 from .text_tables import player_row
 from .votes import (
     add_manual_vote,
@@ -98,6 +106,18 @@ class PollService:
     def can_edit_ratings(self, user_id: int) -> bool:
         # The test runtime also accepts the older production Settings object.
         return user_id == getattr(self.settings, "rating_owner_id", 550539899)
+
+    async def _link_poll_guests(self, names: list[str] | None = None) -> bool:
+        """Called with the service lock held; avoid API requests when no guest matches."""
+        if names is None:
+            names = [v["name"] for v in (self.poll or {}).get("voters", {}).values()]
+        if not any(matching_guests(self.state["players"], name) for name in names):
+            return False
+        members = await self.api.conversation_members(self.settings.peer_id)
+        linked = link_guest_players(self.state["players"], members)
+        if linked:
+            self.save()
+        return bool(linked)
 
     def team_snapshot(self, poll: dict) -> dict | None:
         try:
@@ -310,6 +330,10 @@ class PollService:
 
     async def restore_active_poll(self) -> None:
         async with self.lock:
+            try:
+                await self._link_poll_guests()
+            except Exception as error:
+                self.logger.warning("Не удалось связать записи приглашённых: %s", error)
             await self.refresh_teams("Состав или рейтинги изменились после перезапуска.")
         poll = self.poll
         if not poll or not poll.get("is_open"):
@@ -412,6 +436,12 @@ class PollService:
                 if not poll.get("conversation_message_id"):
                     poll["conversation_message_id"] = int(obj.get("conversation_message_id", 0))
                 name = await self.api.user_name(user_id)
+                try:
+                    if await self._link_poll_guests([name]):
+                        await self.refresh_teams("Приглашённый связан с аккаунтом участника.")
+                        await self._refresh_poll_message(poll)
+                except Exception as error:
+                    self.logger.warning("Не удалось связать запись user_id=%s: %s", user_id, error)
                 previous = poll.setdefault("voters", {}).get(str(user_id))
                 if choice == "cancel":
                     removed = remove_vote(poll, user_id)
@@ -663,10 +693,12 @@ class PollService:
                 members = await self.api.conversation_members(self.settings.peer_id)
                 async with self.lock:
                     players = self.state["players"]
+                    link_guest_players(players, members)
                     for key, name in members.items():
                         players.setdefault(key, {"rating": None})["name"] = name
                     self.save()
                     await self.refresh_teams("Обновлены имена игроков в справочнике.")
+                    await self._refresh_poll_message()
                 await self._send(peer_id, f"Обновлено участников беседы: {len(members)}.")
             elif command == "/players" and args:
                 raise ValueError("Формат: /players или /players sync")
@@ -698,20 +730,37 @@ class PollService:
                     if position is None:
                         raise ValueError("Роль: полевой или вратарь")
                 query = " ".join(args[:-1])
+                members = await self.api.conversation_members(self.settings.peer_id)
                 async with self.lock:
-                    players = self.state["players"]
+                    players = deepcopy(self.state["players"])
+                    link_guest_players(players, members)
                     try:
                         key = find_player(players, query)
                     except ValueError:
                         # Named guests may be registered without a VK account.
-                        if query.isdigit() or any(
+                        if (query.isdigit() and query not in members) or any(
                             any(name_key(name) == name_key(query)
                                 for name in [p["name"], *p.get("aliases", [])])
                             for p in players.values()
                         ):
                             raise
-                        key = "guest:" + name_key(query)
-                        players[key] = {"name": query}
+                        matches = [member_id for member_id, name in members.items()
+                                   if member_id == query or name_key(name) == name_key(query)]
+                        if len(matches) > 1:
+                            raise ValueError("Есть тёзки. Укажите VK ID.")
+                        if matches:
+                            key = matches[0]
+                            players.setdefault(key, {"name": members[key]})
+                        else:
+                            key = "guest:" + name_key(query)
+                            players[key] = {"name": query}
+                    if key.startswith("guest:") and any(
+                        key in matching_guests(players, name) for name in members.values()
+                    ):
+                        raise ValueError(
+                            "Не удалось однозначно связать гостя с участником беседы. "
+                            "Укажите VK ID участника вместо ФИО."
+                        )
                     if command == "/rating":
                         if players[key].get("position") == "goalkeeper":
                             raise ValueError(
@@ -723,6 +772,7 @@ class PollService:
                         players[key]["position"] = position
                         if position == "goalkeeper":
                             players[key]["rating"] = None
+                    self.state["players"] = players
                     self.save()
                     reason = (
                         f"Антон изменил рейтинг игрока {players[key]['name']}."
@@ -766,6 +816,17 @@ class PollService:
         peer_id = int(message.get("peer_id", 0))
         user_id = int(message.get("from_id", 0))
         text = str(message.get("text", "")).strip()
+        action = message.get("action") or {}
+        if peer_id == self.settings.peer_id and action.get("type") in {
+            "chat_invite_user", "chat_invite_user_by_link",
+        }:
+            members = await self.api.conversation_members(peer_id)
+            async with self.lock:
+                if link_guest_players(self.state["players"], members):
+                    self.save()
+                    await self.refresh_teams("Приглашённый вступил в беседу.")
+                    await self._refresh_poll_message()
+            return
         if user_id <= 0 or not text:
             return
         command_text = text.split("@", 1)[0] if text.startswith("/") else text
@@ -860,6 +921,7 @@ class PollService:
             return
         if command == "/teams" and self.is_admin(user_id):
             async with self.lock:
+                await self._link_poll_guests()
                 if self.poll is None:
                     await self._send(peer_id, "Активного опроса нет.")
                 else:
