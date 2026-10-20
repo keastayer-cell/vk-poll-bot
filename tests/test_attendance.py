@@ -1,6 +1,7 @@
 import asyncio
 from copy import deepcopy
 
+import pytest
 from fakes import FakeApi, make_settings
 
 from vk_poll_bot.attendance import record_closed_poll, statistics_text
@@ -78,6 +79,41 @@ def test_display_uses_current_name_and_sorts_by_count():
     result = statistics_text(state)
     assert "Старое" not in result
     assert result.index("Текущее имя") < result.index("Другой")
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_stats_optional_limit_and_invalid_arguments(tmp_path, private):
+    async def scenario():
+        bot = PollService(FakeApi(), make_settings(tmp_path),
+                          JsonStateRepository(tmp_path / "state.json"))
+        bot.state["attendance"] = {"polls": {"p": {}}, "players": {
+            "1": {"name": "Яков", "yes_count": 3},
+            "2": {"name": "Борис", "yes_count": 7},
+            "3": {"name": "Антон", "yes_count": 7},
+            "4": {"name": "Денис", "yes_count": 0},
+        }}
+        original = deepcopy(bot.state["attendance"])
+
+        async def stats(argument):
+            await bot.handle_message_event({"object": {"message": {
+                "peer_id": 10 if private else bot.settings.peer_id,
+                "from_id": 10, "text": f"/stats{argument}",
+            }}})
+            return bot.api.sent[-1][1]
+
+        for argument, expected in [("", ["Антон", "Борис", "Яков", "Денис"]),
+                                   (" 2", ["Антон", "Борис"]),
+                                   (" 1", ["Антон"]),
+                                   (" 10", ["Антон", "Борис", "Яков", "Денис"])]:
+            output = await stats(argument)
+            names = [line.rsplit(" │ ", 1)[-1] for line in output.splitlines()
+                     if " │ " in line and not line.endswith("ФИО")]
+            assert names == expected
+            assert "Закрытых опросов: 1" in output
+        for argument in (" 0", " -1", " текст", " 1.5", " 2 3"):
+            assert "Формат: /stats" in await stats(argument)
+        assert bot.state["attendance"] == original
+    asyncio.run(scenario())
 
 
 def test_close_counts_refusals_and_silent_members_once(tmp_path):

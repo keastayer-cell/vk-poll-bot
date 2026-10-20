@@ -877,7 +877,21 @@ class PollService:
         if command == "/stats" and (
             peer_id == self.settings.peer_id or (peer_id == user_id and self.is_admin(user_id))
         ):
-            result = statistics_text(self.state)
+            limit = None
+            if args:
+                try:
+                    if len(args) != 1:
+                        raise ValueError
+                    limit = int(args[0])
+                    if limit <= 0:
+                        raise ValueError
+                except ValueError:
+                    await self._send(
+                        peer_id, "Формат: /stats — все игроки; /stats 10 — топ-10. "
+                        "Укажите целое число больше нуля.",
+                    )
+                    return
+            result = statistics_text(self.state, limit=limit)
             chunk = ""
             for line in result.splitlines():
                 if len(chunk) + len(line) > 3500:
@@ -902,7 +916,7 @@ class PollService:
             await self._send(
                 peer_id,
                 "Команды: /poll, /status, /close, /plus1, /minus1, /settime, /setdays, /where, "
-                "/teams (админ), /stats. Рейтинги в беседе или личке: /players; "
+                "/teams (админ), /stats [число]. Рейтинги в беседе или личке: /players; "
                 "только для Антона: /players sync, /rating, "
                 "/position, /alias",
             )

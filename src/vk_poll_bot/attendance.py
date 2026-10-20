@@ -43,7 +43,7 @@ def record_closed_poll(state: dict, poll: dict, members: dict | None = None) -> 
     return True
 
 
-def statistics_text(state: dict) -> str:
+def statistics_text(state: dict, limit: int | None = None) -> str:
     attendance = state.get("attendance", {"players": {}, "polls": {}})
     start_date = attendance.get("start_date")
     start_text = ".".join(reversed(start_date.split("-"))) if start_date else ""
@@ -60,6 +60,7 @@ def statistics_text(state: dict) -> str:
         rows.append((entry.get("yes_count", 0),
                      entry.get("no_count", 0) + entry.get("unanswered_count", 0), name))
     rows.sort(key=lambda row: (-row[0], row[2].casefold()))
+    rows = rows[:limit]
     widths = [max([len(title), *(len(str(row[i])) for row in rows)])
               for i, title in enumerate(("ДА", "НЕТ"))]
     lines = ["📊 СТАТИСТИКА ТРЕНИРОВОК", f"Закрытых опросов: {len(attendance['polls'])}", "",
