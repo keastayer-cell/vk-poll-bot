@@ -120,7 +120,7 @@ def poll_players(poll: dict, players: dict) -> list[dict]:
 
 
 def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
-    if team_size not in {4, 5} or len(players) not in {2 * team_size, 3 * team_size}:
+    if team_size not in {4, 5, 6} or len(players) not in {2 * team_size, 3 * team_size}:
         raise ValueError("Нужны две или три равные команды.")
     candidates = []
     minimum_spread = None
@@ -268,9 +268,13 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         return ("Нужны от 8 до 15 полевых. "
                 f"Сейчас игроков: {total}, полевых: {len(fields)}, "
                 f"вратарей: {len(keepers)}. Проверьте роли игроков.")
-    if len(fields) in {13, 14}:
+    six_a_side = len(fields) == 12
+    starters = 6 if six_a_side else 4
+    if six_a_side:
+        teams = balanced_teams(fields, team_size=6)
+    elif len(fields) in {13, 14}:
         teams = balanced_three_with_substitutes(fields)
-    elif len(fields) in {8, 12}:
+    elif len(fields) == 8:
         teams = balanced_teams(fields, team_size=4)
     elif len(fields) in {10, 15}:
         teams = balanced_teams(fields, team_size=5)
@@ -285,14 +289,14 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         total_rating = sum(p["rating"] for p in team)
         sections.append(
             f"⚽ КОМАНДА {number} · {len(team)} полевых\n"
-            f"На поле: 4 · Замены: {len(team) - 4}\n"
+            f"На поле: {starters} · Замены: {len(team) - starters}\n"
             f"Сумма {format_rating(total_rating)} · "
             f"Средний всего состава {total_rating / len(team):.2f}".replace(".", ",") + "\n" +
             "Рейтинг │ ФИО\n────────────────────\n"
             "Основной состав\n" +
-            "\n".join(player_row(p) for p in ordered[:4]) +
-            ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[4:])
-             if len(ordered) > 4 else "")
+            "\n".join(player_row(p) for p in ordered[:starters]) +
+            ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[starters:])
+             if len(ordered) > starters else "")
         )
     if keepers:
         sections.append("🧤 Вратари (распределите сами):\n" +

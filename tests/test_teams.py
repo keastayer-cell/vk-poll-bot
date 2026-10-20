@@ -69,6 +69,41 @@ def test_three_teams_share_stars_and_weak_players():
     assert all(sorted(p["rating"] for p in team) == [3, 6, 6, 9] for team in teams)
 
 
+@pytest.mark.parametrize("lower_is_stronger", [False, True])
+@pytest.mark.parametrize("manual_keeper", [False, True])
+@pytest.mark.parametrize("keeper_count", [0, 1, 2, 3])
+def test_twelve_fields_play_six_a_side(lower_is_stronger, manual_keeper, keeper_count):
+    players = {str(i): {"name": f"Полевой {i}", "position": "field", "rating": i % 3 + 1}
+               for i in range(12)}
+    players.update({f"keeper{i}": {"name": f"Кипер {i}", "position": "goalkeeper",
+                                  "rating": None} for i in range(keeper_count)})
+    poll = {"voters": {key: {"name": p["name"], "choice": "yes"}
+                       for key, p in players.items()
+                       if p["position"] == "field" or not manual_keeper}}
+    if manual_keeper:
+        poll["manual_yes_voters"] = {f"manual:{i}": {"label": f"Кипер {i}"}
+                                     for i in range(keeper_count)}
+    output = teams_text(poll, players, lower_is_stronger=lower_is_stronger)
+    fields, keepers = output.split("🧤 Вратари")
+    sections = fields.strip().split("⚽ КОМАНДА")[1:]
+    assert len(sections) == 2
+    for section in sections:
+        assert "6 полевых\nНа поле: 6 · Замены: 0" in section
+        assert "Сумма 12" in section
+        assert "\nЗамены\n" not in section
+        assert section.count("│ Полевой ") == 6
+    for i in range(12):
+        assert fields.splitlines().count(player_row(players[str(i)])) == 1
+        assert players[str(i)]["rating"] == i % 3 + 1
+    assert "Кипер" not in fields
+    if keeper_count:
+        assert keepers.strip() == "(распределите сами):\n" + "\n".join(
+            player_row(players[f"keeper{i}"]) for i in range(keeper_count)
+        )
+    else:
+        assert "не записались" in keepers
+
+
 @pytest.mark.parametrize("ratings", [
     [6, 7, 8, 6, 2, 9, 5, 8, 8, 6, 6, 8, 7],
     [5] * 13,
@@ -128,7 +163,7 @@ def test_imperfect_balance_and_output_shows_ratings():
             p["rating"] = None
     poll = {"voters": {p["id"]: {"name": p["name"], "choice": "yes"} for p in players}}
     output = teams_text(poll, directory)
-    assert "КОМАНДА 3" in output
+    assert output.count("⚽ КОМАНДА") == 2
     assert player_row({"name": "Игрок 0", "rating": 10}) in output
     assert "Сумма" in output
     assert "Вратари (распределите сами):" in output
@@ -166,14 +201,14 @@ def test_unresolved_player_counts(size):
 
 
 @pytest.mark.parametrize("total,keepers,sizes", [
-    (10, 0, [5, 5]), (11, 0, [6, 5]), (12, 0, [4, 4, 4]),
+    (10, 0, [5, 5]), (11, 0, [6, 5]), (12, 0, [6, 6]),
     (13, 0, [5, 4, 4]), (14, 0, [5, 5, 4]), (15, 0, [5, 5, 5]),
     (10, 1, [5, 4]), (11, 1, [5, 5]), (12, 1, [6, 5]),
-    (13, 1, [4, 4, 4]), (14, 1, [5, 4, 4]), (15, 1, [5, 5, 4]),
+    (13, 1, [6, 6]), (14, 1, [5, 4, 4]), (15, 1, [5, 5, 4]),
     (10, 2, [4, 4]), (11, 2, [5, 4]), (12, 2, [5, 5]),
-    (13, 2, [6, 5]), (14, 2, [4, 4, 4]), (15, 2, [5, 4, 4]),
+    (13, 2, [6, 5]), (14, 2, [6, 6]), (15, 2, [5, 4, 4]),
     (11, 3, [4, 4]), (12, 3, [5, 4]), (13, 3, [5, 5]),
-    (14, 3, [6, 5]), (15, 3, [4, 4, 4]),
+    (14, 3, [6, 5]), (15, 3, [6, 6]),
 ])
 def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, sizes):
     directory = {str(i): {"name": f"Игрок {i}", "position": "field", "rating": 6}
@@ -184,8 +219,10 @@ def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, siz
                        for key, p in directory.items()}}
     output = teams_text(poll, directory)
     assert output.count("⚽ КОМАНДА") == len(sizes)
+    starters = 6 if total - keepers == 12 else 4
     for number, size in enumerate(sizes, 1):
-        assert f"КОМАНДА {number} · {size} полевых\nНа поле: 4 · Замены: {size - 4}" in output
+        assert (f"КОМАНДА {number} · {size} полевых\n"
+                f"На поле: {starters} · Замены: {size - starters}") in output
     fields, keeper_text = output.split("🧤 Вратари")
     if not keepers:
         assert "не записались" in keeper_text
