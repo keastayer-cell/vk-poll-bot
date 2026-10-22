@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 
 import pytest
 from fakes import FakeApi, make_settings
@@ -106,6 +107,39 @@ def test_real_yes_cancellation_under_ten_and_return(tmp_path):
         await vote(bot, 3, "yes")
         assert len(team_messages(bot.api)) == 2
         assert bot.state["team_distribution"] is not None
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_player_changes_after_close_leave_published_teams_unchanged(tmp_path, private):
+    async def scenario():
+        bot = make_bot(tmp_path)
+        await message(bot, "/teams")
+        await bot.close_poll()
+        assert bot.poll is None
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        original = deepcopy(restored.state["team_distribution"])
+        sent_before = len(bot.api.sent)
+        edited_before = list(bot.api.edited)
+
+        await message(restored, "/rating Игрок 3 7", private=private)
+        await message(restored, "/position Игрок 1 полевой", private=private)
+        await message(restored, "/rating Игрок 1 6", private=private)
+
+        assert restored.state["players"]["3"]["rating"] == 7
+        assert restored.state["players"]["1"]["position"] == "field"
+        assert restored.state["players"]["1"]["rating"] == 6
+        assert restored.state["team_distribution"] == original
+        assert not bot.api.deleted
+        assert bot.api.edited == edited_before
+        assert len(team_messages(bot.api)) == 1
+        assert len(bot.api.sent[sent_before:]) == 3
+        assert all(text.startswith("Сохранено:")
+                   for _, text, _ in bot.api.sent[sent_before:])
+
+        await restored.create_poll(force=True)
+        assert len(bot.api.deleted) == 1
+        assert restored.state["team_distribution"] is None
     asyncio.run(scenario())
 
 

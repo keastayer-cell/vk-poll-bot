@@ -149,6 +149,10 @@ class PollService:
         self, reason: str, *, force: bool = False, rebuild: bool = True
     ) -> None:
         """Called under the service lock; remove the old snapshot before publishing another."""
+        # Closed polls keep their published teams; player edits apply to future polls.
+        # A new poll can still remove the previous message with rebuild=False.
+        if rebuild and (not self.poll or not self.poll.get("is_open")):
+            return
         distribution = self.state.get("team_distribution")
         if not distribution:
             if rebuild and self.poll and self.poll.get("teams_requested"):
