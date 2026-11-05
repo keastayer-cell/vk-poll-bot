@@ -212,8 +212,8 @@ def balanced_three_with_substitutes(players: list[dict]) -> list[list[dict]]:
 
 def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
     """Balance two squads, with the larger squad at least as strong per player."""
-    if len(players) not in {9, 11}:
-        raise ValueError("Для двух неравных составов нужны 9 или 11 полевых")
+    if not 8 <= len(players) <= 16:
+        raise ValueError("Для двух составов нужны от 8 до 16 полевых")
     large_size = (len(players) + 1) // 2
     small_size = len(players) // 2
     scale = lcm(large_size, small_size)
@@ -247,8 +247,8 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
     total += len(poll.get("manual_yes_voters", {}))
     if total < 10:
         return f"Записалось {total}. Для распределения нужны минимум 10 человек, включая вратарей."
-    if not 10 <= total <= 15:
-        return f"Записалось {total}. Пока поддерживаем от 10 до 15 записавшихся."
+    if not 10 <= total <= 16:
+        return f"Записалось {total}. Пока поддерживаем от 10 до 16 записавшихся."
     roster = poll_players(poll, players)
     keepers = [p for p in roster if p["position"] == "goalkeeper"]
     fields = [p for p in roster if p["position"] == "field"]
@@ -264,13 +264,15 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         # Negation preserves exact differences and makes lower ratings stronger
         # for the existing sum, profile and unequal-team balancing rules.
         fields = [{**p, "rating": -p["rating"]} for p in fields]
-    if not 8 <= len(fields) <= 15:
-        return ("Нужны от 8 до 15 полевых. "
+    if not 8 <= len(fields) <= 16:
+        return ("Нужны от 8 до 16 полевых. "
                 f"Сейчас игроков: {total}, полевых: {len(fields)}, "
                 f"вратарей: {len(keepers)}. Проверьте роли игроков.")
     six_a_side = len(fields) == 12
     starters = 6 if six_a_side else 4
-    if six_a_side:
+    if total == 16:
+        teams = balanced_with_substitutes(fields)
+    elif six_a_side:
         teams = balanced_teams(fields, team_size=6)
     elif len(fields) in {13, 14}:
         teams = balanced_three_with_substitutes(fields)

@@ -21,14 +21,15 @@ class TestPollService(PollService):
             if not self.is_admin(user_id):
                 return
             args = text.split()[1:]
-            if len(args) != 1 or args[0] not in {str(n) for n in range(10, 16)} | {"20"}:
-                await self._send(peer_id, "Тестовый состав: /demo 10–15 или /demo 20")
+            if len(args) != 1 or args[0] not in {str(n) for n in range(10, 17)} | {"20"}:
+                await self._send(peer_id, "Тестовый состав: /demo 10–16 или /demo 20")
                 return
             total = int(args[0])
             fields = [p for p in self.state["players"].values() if p["position"] == "field"]
             keepers = [p for p in self.state["players"].values()
                        if p["position"] == "goalkeeper"]
-            keeper_count = 2 if total == 15 and len(keepers) == 2 else total // 5
+            keeper_count = (1 if total == 16 else
+                            2 if total == 15 and len(keepers) == 2 else total // 5)
             roster = fields[:total - keeper_count] + keepers[:keeper_count]
             if len(roster) != total:
                 await self._send(peer_id, "Не хватает тестовых игроков в справочнике.")

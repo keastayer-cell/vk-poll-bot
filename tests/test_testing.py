@@ -44,7 +44,7 @@ def test_demo_seeds_only_test_poll_and_sends_no_admin_notifications(tmp_path):
                            else "goalkeeper", "rating": 5 if i < 16 else None}
             for i in range(20)
         }
-        for total in (10, 11, 12, 13, 14, 15, 20):
+        for total in (10, 11, 12, 13, 14, 15, 16, 20):
             await bot.handle_message_event({"object": {"message": {
                 "peer_id": bot.settings.peer_id, "from_id": 10, "text": f"/demo {total}",
             }}})

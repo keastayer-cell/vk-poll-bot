@@ -194,7 +194,7 @@ def test_goalkeepers_excluded_and_positions_required(total):
         assert "│ Игрок 0" in output.split("Вратари (распределите сами):")[1]
 
 
-@pytest.mark.parametrize("size", [9, 16])
+@pytest.mark.parametrize("size", [9, 17])
 def test_unresolved_player_counts(size):
     poll = {"voters": {str(i): {"name": str(i), "choice": "yes"} for i in range(size)}}
     assert f"Записалось {size}" in teams_text(poll, {})
@@ -416,3 +416,32 @@ def test_lower_scale_larger_team_is_stronger_and_best_four_start(field_count):
         assert scores == sorted(scores)
         averages.append(sum(scores) / len(scores))
     assert averages[0] <= min(averages[1:])
+
+
+@pytest.mark.parametrize("keeper_count,sizes", [
+    (0, [8, 8]), (1, [8, 7]), (2, [7, 7]), (3, [7, 6]), (4, [6, 6]),
+])
+@pytest.mark.parametrize("manual_keeper", [False, True])
+@pytest.mark.parametrize("lower_is_stronger", [False, True])
+def test_sixteen_players_always_form_two_squads(keeper_count, sizes, manual_keeper,
+                                               lower_is_stronger):
+    directory = {str(i): {"name": f"Игрок {i}", "position": "field",
+                          "rating": i % 4 + 1} for i in range(16)}
+    for i in range(16 - keeper_count, 16):
+        directory[str(i)].update(position="goalkeeper", rating=None)
+    poll = {"voters": {key: {"name": p["name"], "choice": "yes"}
+                       for key, p in directory.items()
+                       if not manual_keeper or p["position"] == "field"}}
+    if manual_keeper:
+        poll["manual_yes_voters"] = {f"manual:{i}": {"label": directory[str(i)]["name"]}
+                                     for i in range(16 - keeper_count, 16)}
+    text = teams_text(poll, directory, lower_is_stronger=lower_is_stronger)
+    assert text.count("⚽ КОМАНДА") == 2
+    for number, size in enumerate(sizes, 1):
+        assert f"КОМАНДА {number} · {size} полевых" in text
+    fields, keepers = text.split("🧤 Вратари")
+    for i, player in directory.items():
+        section = fields if player["position"] == "field" else keepers
+        assert section.splitlines().count(player_row(player)) == 1
+    if not keeper_count:
+        assert "не записались" in keepers
