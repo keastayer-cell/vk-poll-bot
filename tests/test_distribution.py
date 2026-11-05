@@ -270,3 +270,26 @@ def test_lower_rating_scale_survives_restart_and_updates_starters(tmp_path):
         section = next(part for part in text.split('⚽ КОМАНДА') if 'Игрок 3' in part)
         assert 'Игрок 3' in section.split('Замены\n')[0]
     asyncio.run(scenario())
+
+
+def test_sixteen_player_saved_teams_refresh_once_for_full_squads(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path, total=16, keepers=1)
+        await message(bot, "/teams")
+        saved = bot.state["team_distribution"]
+        saved["snapshot"].pop("lineup_format")
+        original_id = saved["message_id"]
+        bot.save()
+
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert bot.api.deleted == [(bot.settings.peer_id, original_id, 0)]
+        assert len(team_messages(bot.api)) == 2
+        text = restored.state["team_distribution"]["text"]
+        assert "КОМАНДА 1 · 8 полевых" in text
+        assert "КОМАНДА 2 · 7 полевых" in text
+        assert "Замены" not in text and "Основной состав" not in text
+        await restored.restore_active_poll()
+        await message(restored, "/teams")
+        assert len(team_messages(bot.api)) == 2
+    asyncio.run(scenario())

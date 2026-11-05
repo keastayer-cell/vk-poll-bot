@@ -289,16 +289,20 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
             p["rating"] if lower_is_stronger else -p["rating"], p["name"]
         ))
         total_rating = sum(p["rating"] for p in team)
+        if total == 16:
+            game_format = ""
+            lineup = "\n".join(player_row(p) for p in ordered)
+        else:
+            game_format = f"На поле: {starters} · Замены: {len(team) - starters}\n"
+            lineup = ("Основной состав\n" +
+                      "\n".join(player_row(p) for p in ordered[:starters]) +
+                      ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[starters:])
+                       if len(ordered) > starters else ""))
         sections.append(
-            f"⚽ КОМАНДА {number} · {len(team)} полевых\n"
-            f"На поле: {starters} · Замены: {len(team) - starters}\n"
+            f"⚽ КОМАНДА {number} · {len(team)} полевых\n" + game_format +
             f"Сумма {format_rating(total_rating)} · "
             f"Средний всего состава {total_rating / len(team):.2f}".replace(".", ",") + "\n" +
-            "Рейтинг │ ФИО\n────────────────────\n"
-            "Основной состав\n" +
-            "\n".join(player_row(p) for p in ordered[:starters]) +
-            ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[starters:])
-             if len(ordered) > starters else "")
+            "Рейтинг │ ФИО\n────────────────────\n" + lineup
         )
     if keepers:
         sections.append("🧤 Вратари (распределите сами):\n" +

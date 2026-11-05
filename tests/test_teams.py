@@ -437,6 +437,9 @@ def test_sixteen_players_always_form_two_squads(keeper_count, sizes, manual_keep
                                      for i in range(16 - keeper_count, 16)}
     text = teams_text(poll, directory, lower_is_stronger=lower_is_stronger)
     assert text.count("⚽ КОМАНДА") == 2
+    assert "На поле:" not in text
+    assert "Основной состав" not in text
+    assert "Замены" not in text
     for number, size in enumerate(sizes, 1):
         assert f"КОМАНДА {number} · {size} полевых" in text
     fields, keepers = text.split("🧤 Вратари")

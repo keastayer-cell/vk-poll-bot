@@ -125,6 +125,8 @@ class PollService:
         except ValueError:
             return None
         snapshot = {"poll_id": poll["poll_id"], "players": roster}
+        if len(roster) == 16:
+            snapshot["lineup_format"] = "full_squads"
         if self.state.get("rating_order") == "lower":
             snapshot["rating_order"] = "lower"
         return snapshot
