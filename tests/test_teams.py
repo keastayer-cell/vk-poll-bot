@@ -210,7 +210,7 @@ def test_unresolved_player_counts(size):
     (10, 2, [4, 4]), (11, 2, [5, 4]), (12, 2, [5, 5]),
     (13, 2, [6, 5]), (14, 2, [6, 6]), (15, 2, [5, 4, 4]),
     (11, 3, [4, 4]), (12, 3, [5, 4]), (13, 3, [5, 5]),
-    (14, 3, [6, 5]), (15, 3, [4, 4, 4]),
+    (15, 3, [4, 4, 4]),
 ])
 def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, sizes):
     directory = {str(i): {"name": f"Игрок {i}", "position": "field", "rating": 6}
@@ -451,3 +451,23 @@ def test_sixteen_players_always_form_two_squads(keeper_count, sizes, manual_keep
         assert section.splitlines().count(player_row(player)) == 1
     if not keeper_count:
         assert "не записались" in keepers
+
+
+@pytest.mark.parametrize("manual_keepers", [False, True])
+@pytest.mark.parametrize("lower_is_stronger", [False, True])
+def test_eleven_fields_with_three_keepers_cannot_be_distributed(manual_keepers, lower_is_stronger):
+    players = {str(i): {"name": f"Полевой {i}", "position": "field", "rating": 2}
+               for i in range(11)}
+    players.update({f"keeper{i}": {"name": f"Кипер {i}", "position": "goalkeeper",
+                                   "rating": None} for i in range(3)})
+    poll = {"voters": {key: {"name": p["name"], "choice": "yes"}
+                       for key, p in players.items()
+                       if p["position"] == "field" or not manual_keepers}}
+    if manual_keepers:
+        poll["manual_yes_voters"] = {f"manual:{i}": {"label": f"Кипер {i}"}
+                                     for i in range(3)}
+    output = teams_text(poll, players, lower_is_stronger=lower_is_stronger)
+    assert output.startswith("⚠️ Распределение невозможно:")
+    assert "11 полевых и 3 вратаря" in output
+    assert "не хватает одного полевого игрока" in output
+    assert "⚽ КОМАНДА" not in output

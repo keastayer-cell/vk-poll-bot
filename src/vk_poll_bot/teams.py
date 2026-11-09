@@ -254,6 +254,9 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
     roster = poll_players(poll, players)
     keepers = [p for p in roster if p["position"] == "goalkeeper"]
     fields = [p for p in roster if p["position"] == "field"]
+    if len(fields) == 11 and len(keepers) == 3:
+        return ("⚠️ Распределение невозможно: записались 11 полевых и 3 вратаря. "
+                "Для трёх команд по 4 полевых не хватает одного полевого игрока.")
     if lower_is_stronger:
         for player in fields:
             if player["rating"] > 4:

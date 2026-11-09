@@ -346,3 +346,29 @@ def test_saved_squads_gain_permanent_kit_colors_once(tmp_path, total, keepers):
         await message(restored, "/teams")
         assert len(team_messages(bot.api)) == 2
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("is_open", [False, True])
+def test_unsupported_saved_squads_are_removed_and_requests_return_error(tmp_path, is_open):
+    async def scenario():
+        bot = make_bot(tmp_path, total=14, keepers=3)
+        await bot.publish_teams(bot.poll, "⚽ КОМАНДА 1 · 6 полевых\n⚽ КОМАНДА 2 · 5 полевых")
+        saved = bot.state["team_distribution"]
+        saved["snapshot"].pop("lineup_format")
+        original_id = saved["message_id"]
+        bot.poll["is_open"] = is_open
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert bot.api.deleted == [(bot.settings.peer_id, original_id, 0)]
+        assert restored.state["team_distribution"] is None
+        assert len(team_messages(bot.api)) == 1  # Only the old message, never a new lineup.
+        for private in (False, True):
+            await message(restored, "/teams", private=private)
+            assert bot.api.sent[-1][1].startswith("⚠️ Распределение невозможно:")
+            assert "не хватает одного полевого игрока" in bot.api.sent[-1][1]
+        await restored.restore_active_poll()
+        assert len(bot.api.deleted) == 1
+        assert restored.state["team_distribution"] is None
+        assert len(team_messages(bot.api)) == 1
+    asyncio.run(scenario())

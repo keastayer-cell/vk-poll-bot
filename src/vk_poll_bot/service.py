@@ -130,6 +130,8 @@ class PollService:
             snapshot["lineup_format"] = "full_squads"
         elif len(roster) == 15 and sum(p["position"] == "goalkeeper" for p in roster) == 3:
             snapshot["lineup_format"] = "three_four_a_side"
+        elif len(roster) == 14 and sum(p["position"] == "goalkeeper" for p in roster) == 3:
+            snapshot["lineup_format"] = "insufficient_fields_for_three_teams"
         if self.state.get("rating_order") == "lower":
             snapshot["rating_order"] = "lower"
         return snapshot
@@ -155,9 +157,12 @@ class PollService:
     ) -> None:
         """Called under the service lock; remove the old snapshot before publishing another."""
         # Closed polls keep their published teams; player edits apply to future polls.
+        # Remove the explicitly unsupported 11-field/3-keeper lineup even after closure.
         # A new poll can still remove the previous message with rebuild=False.
         if rebuild and (not self.poll or not self.poll.get("is_open")):
-            return
+            snapshot = self.team_snapshot(self.poll) if self.poll else None
+            if (snapshot or {}).get("lineup_format") != "insufficient_fields_for_three_teams":
+                return
         distribution = self.state.get("team_distribution")
         if not distribution:
             if rebuild and self.poll and self.poll.get("teams_requested"):
