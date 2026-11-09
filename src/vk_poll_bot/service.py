@@ -127,6 +127,8 @@ class PollService:
         snapshot = {"poll_id": poll["poll_id"], "players": roster}
         if len(roster) == 16:
             snapshot["lineup_format"] = "full_squads"
+        elif len(roster) == 15 and sum(p["position"] == "goalkeeper" for p in roster) == 3:
+            snapshot["lineup_format"] = "three_four_a_side"
         if self.state.get("rating_order") == "lower":
             snapshot["rating_order"] = "lower"
         return snapshot

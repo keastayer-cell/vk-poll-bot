@@ -72,7 +72,7 @@ def test_three_teams_share_stars_and_weak_players():
 @pytest.mark.parametrize("lower_is_stronger", [False, True])
 @pytest.mark.parametrize("manual_keeper", [False, True])
 @pytest.mark.parametrize("keeper_count", [0, 1, 2, 3])
-def test_twelve_fields_play_six_a_side(lower_is_stronger, manual_keeper, keeper_count):
+def test_twelve_fields_follow_keeper_count(lower_is_stronger, manual_keeper, keeper_count):
     players = {str(i): {"name": f"Полевой {i}", "position": "field", "rating": i % 3 + 1}
                for i in range(12)}
     players.update({f"keeper{i}": {"name": f"Кипер {i}", "position": "goalkeeper",
@@ -86,12 +86,13 @@ def test_twelve_fields_play_six_a_side(lower_is_stronger, manual_keeper, keeper_
     output = teams_text(poll, players, lower_is_stronger=lower_is_stronger)
     fields, keepers = output.split("🧤 Вратари")
     sections = fields.strip().split("⚽ КОМАНДА")[1:]
-    assert len(sections) == 2
+    size = 4 if keeper_count == 3 else 6
+    assert len(sections) == 12 // size
     for section in sections:
-        assert "6 полевых\nНа поле: 6 · Замены: 0" in section
-        assert "Сумма 12" in section
+        assert f"{size} полевых\nНа поле: {size} · Замены: 0" in section
+        assert f"Сумма {size * 2}" in section
         assert "\nЗамены\n" not in section
-        assert section.count("│ Полевой ") == 6
+        assert section.count("│ Полевой ") == size
     for i in range(12):
         assert fields.splitlines().count(player_row(players[str(i)])) == 1
         assert players[str(i)]["rating"] == i % 3 + 1
@@ -163,7 +164,7 @@ def test_imperfect_balance_and_output_shows_ratings():
             p["rating"] = None
     poll = {"voters": {p["id"]: {"name": p["name"], "choice": "yes"} for p in players}}
     output = teams_text(poll, directory)
-    assert output.count("⚽ КОМАНДА") == 2
+    assert output.count("⚽ КОМАНДА") == 3
     assert player_row({"name": "Игрок 0", "rating": 10}) in output
     assert "Сумма" in output
     assert "Вратари (распределите сами):" in output
@@ -208,7 +209,7 @@ def test_unresolved_player_counts(size):
     (10, 2, [4, 4]), (11, 2, [5, 4]), (12, 2, [5, 5]),
     (13, 2, [6, 5]), (14, 2, [6, 6]), (15, 2, [5, 4, 4]),
     (11, 3, [4, 4]), (12, 3, [5, 4]), (13, 3, [5, 5]),
-    (14, 3, [6, 5]), (15, 3, [6, 6]),
+    (14, 3, [6, 5]), (15, 3, [4, 4, 4]),
 ])
 def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, sizes):
     directory = {str(i): {"name": f"Игрок {i}", "position": "field", "rating": 6}
@@ -219,7 +220,7 @@ def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, siz
                        for key, p in directory.items()}}
     output = teams_text(poll, directory)
     assert output.count("⚽ КОМАНДА") == len(sizes)
-    starters = 6 if total - keepers == 12 else 4
+    starters = 6 if total - keepers == 12 and keepers < 3 else 4
     for number, size in enumerate(sizes, 1):
         assert (f"КОМАНДА {number} · {size} полевых\n"
                 f"На поле: {starters} · Замены: {size - starters}") in output

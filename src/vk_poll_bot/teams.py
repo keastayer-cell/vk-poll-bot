@@ -268,7 +268,7 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         return ("Нужны от 8 до 16 полевых. "
                 f"Сейчас игроков: {total}, полевых: {len(fields)}, "
                 f"вратарей: {len(keepers)}. Проверьте роли игроков.")
-    six_a_side = len(fields) == 12
+    six_a_side = len(fields) == 12 and len(keepers) < 3
     starters = 6 if six_a_side else 4
     if total == 16:
         teams = balanced_with_substitutes(fields)
@@ -276,7 +276,7 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
         teams = balanced_teams(fields, team_size=6)
     elif len(fields) in {13, 14}:
         teams = balanced_three_with_substitutes(fields)
-    elif len(fields) == 8:
+    elif len(fields) in {8, 12}:
         teams = balanced_teams(fields, team_size=4)
     elif len(fields) in {10, 15}:
         teams = balanced_teams(fields, team_size=5)

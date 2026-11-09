@@ -293,3 +293,27 @@ def test_sixteen_player_saved_teams_refresh_once_for_full_squads(tmp_path):
         await message(restored, "/teams")
         assert len(team_messages(bot.api)) == 2
     asyncio.run(scenario())
+
+
+def test_twelve_fields_and_three_keepers_rebuild_old_squads_once(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path, total=15, keepers=3)
+        await message(bot, "/teams")
+        distribution = bot.state["team_distribution"]
+        original = distribution["message_id"]
+        # Persist the previous format's snapshot and message as before an update.
+        distribution["snapshot"].pop("lineup_format")
+        distribution["text"] = "⚽ КОМАНДА 1 · 6 полевых\n⚽ КОМАНДА 2 · 6 полевых"
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert bot.api.deleted == [(bot.settings.peer_id, original, 0)]
+        text = restored.state["team_distribution"]["text"]
+        assert text.count("⚽ КОМАНДА") == 3
+        assert text.count("4 полевых\nНа поле: 4 · Замены: 0") == 3
+        assert "6 полевых" not in text
+        assert text.count("🧤 │") == 3
+        published = len(team_messages(bot.api))
+        await restored.restore_active_poll()
+        assert len(team_messages(bot.api)) == published
+    asyncio.run(scenario())
