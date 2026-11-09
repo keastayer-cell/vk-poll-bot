@@ -124,7 +124,8 @@ class PollService:
             roster = sorted(poll_players(poll, self.state["players"]), key=lambda p: p["id"])
         except ValueError:
             return None
-        snapshot = {"poll_id": poll["poll_id"], "players": roster}
+        snapshot = {"poll_id": poll["poll_id"], "players": roster,
+                    "kit_colors": "black_white_red"}
         if len(roster) == 16:
             snapshot["lineup_format"] = "full_squads"
         elif len(roster) == 15 and sum(p["position"] == "goalkeeper" for p in roster) == 3:

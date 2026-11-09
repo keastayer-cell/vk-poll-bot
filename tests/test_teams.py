@@ -89,7 +89,8 @@ def test_twelve_fields_follow_keeper_count(lower_is_stronger, manual_keeper, kee
     size = 4 if keeper_count == 3 else 6
     assert len(sections) == 12 // size
     for section in sections:
-        assert f"{size} полевых\nНа поле: {size} · Замены: 0" in section
+        assert f"{size} полевых\n" in section
+        assert f"На поле: {size} · Замены: 0" in section
         assert f"Сумма {size * 2}" in section
         assert "\nЗамены\n" not in section
         assert section.count("│ Полевой ") == size
@@ -222,7 +223,8 @@ def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, siz
     assert output.count("⚽ КОМАНДА") == len(sizes)
     starters = 6 if total - keepers == 12 and keepers < 3 else 4
     for number, size in enumerate(sizes, 1):
-        assert (f"КОМАНДА {number} · {size} полевых\n"
+        color = ("⬛ Форма: чёрная", "⬜ Форма: белая", "🟥 Форма: красная")[number - 1]
+        assert (f"КОМАНДА {number} · {size} полевых\n{color}\n"
                 f"На поле: {starters} · Замены: {size - starters}") in output
     fields, keeper_text = output.split("🧤 Вратари")
     if not keepers:

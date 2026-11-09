@@ -310,10 +310,39 @@ def test_twelve_fields_and_three_keepers_rebuild_old_squads_once(tmp_path):
         assert bot.api.deleted == [(bot.settings.peer_id, original, 0)]
         text = restored.state["team_distribution"]["text"]
         assert text.count("⚽ КОМАНДА") == 3
-        assert text.count("4 полевых\nНа поле: 4 · Замены: 0") == 3
+        assert text.count("4 полевых\n") == 3
+        assert text.count("На поле: 4 · Замены: 0") == 3
         assert "6 полевых" not in text
         assert text.count("🧤 │") == 3
         published = len(team_messages(bot.api))
         await restored.restore_active_poll()
         assert len(team_messages(bot.api)) == published
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("total,keepers", [(11, 2), (15, 3), (16, 1)])
+def test_saved_squads_gain_permanent_kit_colors_once(tmp_path, total, keepers):
+    async def scenario():
+        bot = make_bot(tmp_path, total=total, keepers=keepers)
+        await message(bot, "/teams")
+        saved = bot.state["team_distribution"]
+        original_id = saved["message_id"]
+        saved["snapshot"].pop("kit_colors")
+        colors = ("⬛ Форма: чёрная", "⬜ Форма: белая", "🟥 Форма: красная")
+        saved["text"] = "\n".join(line for line in saved["text"].splitlines()
+                                   if line not in colors)
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert bot.api.deleted == [(bot.settings.peer_id, original_id, 0)]
+        text = restored.state["team_distribution"]["text"]
+        sections = text.split("⚽ КОМАНДА")[1:]
+        assert len(sections) == (3 if total == 15 else 2)
+        for number, section in enumerate(sections, 1):
+            assert section.startswith(f" {number} ·")
+            assert section.splitlines()[1] == colors[number - 1]
+            assert sum(color in section for color in colors) == 1
+        await restored.restore_active_poll()
+        await message(restored, "/teams")
+        assert len(team_messages(bot.api)) == 2
     asyncio.run(scenario())

@@ -7,6 +7,8 @@ from math import lcm
 from .ratings import format_rating, rating_units, valid_rating
 from .text_tables import player_row
 
+TEAM_KITS = ("⬛ Форма: чёрная", "⬜ Форма: белая", "🟥 Форма: красная")
+
 
 def name_key(name: str) -> str:
     return " ".join(sorted(name.casefold().replace("ё", "е").split()))
@@ -299,7 +301,8 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
                       ("\n\nЗамены\n" + "\n".join(player_row(p) for p in ordered[starters:])
                        if len(ordered) > starters else ""))
         sections.append(
-            f"⚽ КОМАНДА {number} · {len(team)} полевых\n" + game_format +
+            f"⚽ КОМАНДА {number} · {len(team)} полевых\n{TEAM_KITS[number - 1]}\n" +
+            game_format +
             f"Сумма {format_rating(total_rating)} · "
             f"Средний всего состава {total_rating / len(team):.2f}".replace(".", ",") + "\n" +
             "Рейтинг │ ФИО\n────────────────────\n" + lineup
