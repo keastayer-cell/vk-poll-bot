@@ -87,7 +87,7 @@ def test_rating_changes_only_for_participants_rebuild_teams(tmp_path, private):
         assert bot.api.deleted == [(bot.settings.peer_id, original, 0)]
         assert len(team_messages(bot.api)) == 2
         assert "Игрок 3" in bot.state["team_distribution"]["text"]
-        assert any("Антон изменил рейтинг игрока Игрок 3" in text
+        assert any("Владелец рейтингов изменил рейтинг игрока Игрок 3" in text
                    for _, text, _ in bot.api.sent)
     asyncio.run(scenario())
 

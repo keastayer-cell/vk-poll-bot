@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .api import VkApiError
 from .attendance import poll_counts_for_attendance, record_closed_poll, statistics_text
+from .config import DEFAULT_RATING_OWNER_ID
 from .keyboards import decode_payload, poll_keyboard
 from .models import new_poll_state, normalize_state
 from .ratings import format_rating, parse_rating
@@ -112,7 +113,7 @@ class PollService:
 
     def can_edit_ratings(self, user_id: int) -> bool:
         # The test runtime also accepts the older production Settings object.
-        return user_id == getattr(self.settings, "rating_owner_id", 550539899)
+        return user_id == getattr(self.settings, "rating_owner_id", DEFAULT_RATING_OWNER_ID)
 
     async def _link_poll_guests(self, names: list[str] | None = None) -> bool:
         """Called with the service lock held; avoid API requests when no guest matches."""
@@ -777,7 +778,9 @@ class PollService:
                 async with self.lock:
                     key = add_alias(self.state["players"], query.strip(), alias.strip())
                     self.save()
-                    await self.refresh_teams("Антон обновил дополнительные имена игроков.")
+                    await self.refresh_teams(
+                        "Владелец рейтингов обновил дополнительные имена игроков."
+                    )
                 await self._send(
                     peer_id,
                     f"Имя «{alias.strip()}» привязано к {self.state['players'][key]['name']}",
@@ -843,9 +846,9 @@ class PollService:
                     self.state["players"] = players
                     self.save()
                     reason = (
-                        f"Антон изменил рейтинг игрока {players[key]['name']}."
+                        f"Владелец рейтингов изменил рейтинг игрока {players[key]['name']}."
                         if command == "/rating" else
-                        f"Антон изменил роль игрока {players[key]['name']}."
+                        f"Владелец рейтингов изменил роль игрока {players[key]['name']}."
                     )
                     await self.refresh_teams(reason)
                     await self._refresh_poll_message()
@@ -939,7 +942,7 @@ class PollService:
                 await self.player_command(command, args, peer_id)
             else:
                 await self._send(
-                    peer_id, "Изменять игроков и рейтинги может только владелец рейтинга — Антон."
+                    peer_id, "Изменять игроков и рейтинги может только владелец рейтинга."
                 )
             return
         if command == "/stats" and (
@@ -985,7 +988,7 @@ class PollService:
                 peer_id,
                 "Команды: /poll, /status, /close, /plus1, /minus1, /settime, /setdays, /where, "
                 "/teams (админ), /stats [число]. Рейтинги в беседе или личке: /players; "
-                "только для Антона: /players sync, /rating, "
+                "только для владельца рейтингов: /players sync, /rating, "
                 "/position, /alias",
             )
             return

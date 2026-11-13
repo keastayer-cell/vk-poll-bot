@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+DEFAULT_RATING_OWNER_ID = 550539899
 
 
 def _integer(name: str, default: str = "0") -> int:
@@ -69,7 +71,7 @@ class Settings:
     remind_thu_minute: int
     data_dir: Path
     enable_scheduler: bool
-    rating_owner_id: int = 550539899
+    rating_owner_id: int = DEFAULT_RATING_OWNER_ID
 
     @property
     def initial_schedule(self) -> dict:
@@ -104,6 +106,15 @@ def load_settings(base_dir: str | Path = ".") -> Settings:
     threshold = _integer("YES_THRESHOLD", "10")
     if threshold < 1:
         raise ValueError("YES_THRESHOLD должен быть положительным")
+    rating_owner_id = _integer("RATING_OWNER_ID", str(DEFAULT_RATING_OWNER_ID))
+    if rating_owner_id <= 0:
+        raise ValueError("RATING_OWNER_ID должен быть положительным")
+    admin_ids = _int_list("ADMIN_IDS")
+    if not admin_ids:
+        logging.getLogger(__name__).warning(
+            "ADMIN_IDS пуст: административные команды и личные уведомления "
+            "администраторам недоступны. Узнайте свой ID через /where и заполните ADMIN_IDS."
+        )
     poll_hour, poll_minute = _time("POLL_TIME", "08:00")
     deadline_hour, deadline_minute = _time("DEADLINE_TIME", "15:00")
     close_hour, close_minute = _time("CLOSE_TIME", "20:00")
@@ -118,7 +129,8 @@ def load_settings(base_dir: str | Path = ".") -> Settings:
         group_id=group_id,
         peer_id=_integer("VK_PEER_ID"),
         api_version=os.getenv("VK_API_VERSION", "5.199").strip() or "5.199",
-        admin_ids=_int_list("ADMIN_IDS"),
+        admin_ids=admin_ids,
+        rating_owner_id=rating_owner_id,
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip() or "Europe/Moscow",
         yes_threshold=threshold,
         poll_question=os.getenv("POLL_QUESTION", "Идете?").strip() or "Идете?",

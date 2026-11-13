@@ -471,3 +471,16 @@ def test_eleven_fields_with_three_keepers_cannot_be_distributed(manual_keepers, 
     assert "11 полевых и 3 вратаря" in output
     assert "не хватает одного полевого игрока" in output
     assert "⚽ КОМАНДА" not in output
+
+
+def test_configured_rating_owner_does_not_grant_access_to_other_admins(tmp_path):
+    from vk_poll_bot.config import DEFAULT_RATING_OWNER_ID
+
+    async def scenario():
+        settings = make_settings(tmp_path, rating_owner_id=123456,
+                                 admin_ids=(DEFAULT_RATING_OWNER_ID, 23772422))
+        bot = PollService(FakeApi(), settings, JsonStateRepository(tmp_path / "state.json"))
+        assert bot.can_edit_ratings(123456)
+        assert not bot.can_edit_ratings(DEFAULT_RATING_OWNER_ID)
+        assert not bot.can_edit_ratings(23772422)
+    asyncio.run(scenario())
