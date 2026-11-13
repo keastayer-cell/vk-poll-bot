@@ -5,6 +5,7 @@ from itertools import combinations
 from math import lcm
 
 from .ratings import format_rating, rating_units, valid_rating
+from .team_selection import TeamSelection
 from .text_tables import player_row
 
 TEAM_KITS = ("⬛ Форма: чёрная", "⬜ Форма: белая", "🟥 Форма: красная")
@@ -121,7 +122,9 @@ def poll_players(poll: dict, players: dict) -> list[dict]:
     return result
 
 
-def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
+def balanced_teams(
+    players: list[dict], team_size: int = 5, *, selection: TeamSelection | None = None
+) -> list[list[dict]]:
     if team_size not in {4, 5, 6} or len(players) not in {2 * team_size, 3 * team_size}:
         raise ValueError("Нужны две или три равные команды.")
     candidates = []
@@ -157,11 +160,17 @@ def balanced_teams(players: list[dict], team_size: int = 5) -> list[list[dict]]:
                 for rank in range(team_size)
             )
             candidates.append((spread, profile_cost, sum(t * t for t in totals), groups))
-    _, _, _, best_groups = min(candidates, key=lambda c: (c[1], c[0], c[2]))
+    def score(candidate):
+        return candidate[1], candidate[0], candidate[2]
+
+    best_groups = (selection.select(candidates, players, score) if selection else
+                   min(candidates, key=score)[-1])
     return [[players[i] for i in group] for group in best_groups]
 
 
-def balanced_three_with_substitutes(players: list[dict]) -> list[list[dict]]:
+def balanced_three_with_substitutes(
+    players: list[dict], *, selection: TeamSelection | None = None
+) -> list[list[dict]]:
     if len(players) not in {13, 14}:
         raise ValueError("Для трёх неравных составов нужны 13 или 14 полевых")
     indices = tuple(range(len(players)))
@@ -208,11 +217,17 @@ def balanced_three_with_substitutes(players: list[dict]) -> list[list[dict]]:
                 for a in range(3) for b in range(a + 1, 3) for rank in range(20)
             )
             candidates.append((spread, profile_cost, sum(a * a for a in averages), groups))
-    _, _, _, best_groups = min(candidates, key=lambda c: (c[1], c[0], c[2]))
+    def score(candidate):
+        return candidate[1], candidate[0], candidate[2]
+
+    best_groups = (selection.select(candidates, players, score) if selection else
+                   min(candidates, key=score)[-1])
     return [[players[i] for i in group] for group in best_groups]
 
 
-def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
+def balanced_with_substitutes(
+    players: list[dict], *, selection: TeamSelection | None = None
+) -> list[list[dict]]:
     """Balance two squads, with the larger squad at least as strong per player."""
     if not 8 <= len(players) <= 16:
         raise ValueError("Для двух составов нужны от 8 до 16 полевых")
@@ -240,11 +255,18 @@ def balanced_with_substitutes(players: list[dict]) -> list[list[dict]]:
             continue
         profile_cost = sum((a - b) ** 2 for a, b in zip(*profiles))
         candidates.append((spread, profile_cost, groups))
-    _, _, best_groups = min(candidates, key=lambda c: (c[1], c[0]))
+    def score(candidate):
+        return candidate[1], candidate[0]
+
+    best_groups = (selection.select(candidates, players, score) if selection else
+                   min(candidates, key=score)[-1])
     return [[players[i] for i in group] for group in best_groups]
 
 
-def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) -> str:
+def teams_text(
+    poll: dict, players: dict, *, lower_is_stronger: bool = False,
+    selection: TeamSelection | None = None,
+) -> str:
     total = sum(v.get("choice") == "yes" for v in poll.get("voters", {}).values())
     total += len(poll.get("manual_yes_voters", {}))
     if total < 10:
@@ -276,17 +298,17 @@ def teams_text(poll: dict, players: dict, *, lower_is_stronger: bool = False) ->
     six_a_side = len(fields) == 12 and len(keepers) < 3
     starters = 6 if six_a_side else 4
     if total == 16:
-        teams = balanced_with_substitutes(fields)
+        teams = balanced_with_substitutes(fields, selection=selection)
     elif six_a_side:
-        teams = balanced_teams(fields, team_size=6)
+        teams = balanced_teams(fields, team_size=6, selection=selection)
     elif len(fields) in {13, 14}:
-        teams = balanced_three_with_substitutes(fields)
+        teams = balanced_three_with_substitutes(fields, selection=selection)
     elif len(fields) in {8, 12}:
-        teams = balanced_teams(fields, team_size=4)
+        teams = balanced_teams(fields, team_size=4, selection=selection)
     elif len(fields) in {10, 15}:
-        teams = balanced_teams(fields, team_size=5)
+        teams = balanced_teams(fields, team_size=5, selection=selection)
     else:
-        teams = balanced_with_substitutes(fields)
+        teams = balanced_with_substitutes(fields, selection=selection)
     sections = []
     for number, team in enumerate(teams, 1):
         team = [{**p, "rating": original_ratings[p["id"]]} for p in team]

@@ -372,3 +372,122 @@ def test_unsupported_saved_squads_are_removed_and_requests_return_error(tmp_path
         assert restored.state["team_distribution"] is None
         assert len(team_messages(bot.api)) == 1
     asyncio.run(scenario())
+
+
+def test_redraw_changes_memberships_but_restart_and_plain_teams_preserve_them(tmp_path):
+    from vk_poll_bot.team_selection import partition
+
+    async def scenario():
+        bot = make_bot(tmp_path, total=15, keepers=3)
+        await message(bot, "/teams")
+        for _ in range(3):
+            old = deepcopy(bot.state["team_distribution"])
+            await message(bot, "/teams rebuild")
+            current = bot.state["team_distribution"]
+            assert partition(current["teams"]) != partition(old["teams"])
+            assert sorted(map(len, current["teams"])) == [4, 4, 4]
+            assert bot.state["team_history"] == []
+        saved = deepcopy(bot.state["team_distribution"])
+        count = len(team_messages(bot.api))
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        await message(restored, "/teams")
+        assert restored.state["team_distribution"] == saved
+        assert len(team_messages(bot.api)) == count
+    asyncio.run(scenario())
+
+
+def test_only_final_lineup_is_recorded_once_on_close_and_survives_restart(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path, total=15, keepers=3)
+        await message(bot, "/teams")
+        await message(bot, "/teams rebuild")
+        final = deepcopy(bot.state["team_distribution"]["teams"])
+        poll_id = bot.poll["poll_id"]
+        assert not bot.state["team_history"]
+        await bot.close_poll()
+        await bot.close_poll()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        assert restored.state["team_history"] == [
+            {"poll_id": poll_id, "poll_date": bot.state["team_history"][0]["poll_date"],
+             "teams": final}]
+        before = deepcopy(restored.state["team_distribution"])
+        await message(restored, "/teams rebuild")
+        assert "Пересборка недоступна" in bot.api.sent[-1][1]
+        assert restored.state["team_distribution"] == before
+    asyncio.run(scenario())
+
+
+def test_no_alternative_keeps_old_message_and_state(tmp_path, monkeypatch):
+    from vk_poll_bot.team_selection import NoAlternative
+
+    async def scenario():
+        bot = make_bot(tmp_path)
+        await message(bot, "/teams")
+        original = deepcopy(bot.state["team_distribution"])
+
+        def impossible(poll, previous=None):
+            assert previous == original["teams"]
+            raise NoAlternative("⚠️ Другого распределения нет. Прежние составы сохранены.")
+
+        monkeypatch.setattr(bot, "prepare_teams", impossible)
+        await message(bot, "/teams rebuild")
+        assert not bot.api.deleted
+        assert bot.state["team_distribution"] == original
+        assert "Прежние составы сохранены" in bot.api.sent[-1][1]
+        assert len(team_messages(bot.api)) == 1
+    asyncio.run(scenario())
+
+
+def test_new_poll_reduces_repeat_pairs_and_history_has_last_five_games(tmp_path):
+    from vk_poll_bot.team_selection import partition
+
+    async def scenario():
+        bot = make_bot(tmp_path, total=10, keepers=2)
+        voters = deepcopy(bot.poll["voters"])
+        for day in range(1, 8):
+            if day > 1:
+                await bot.create_poll(f"2026-11-{day:02d}", force=True)
+                bot.poll["voters"] = deepcopy(voters)
+            await message(bot, "/teams")
+            if day == 2:
+                assert partition(bot.state["team_distribution"]["teams"]) != partition(
+                    bot.state["team_history"][-1]["teams"])
+            await bot.close_poll()
+        history = bot.state["team_history"]
+        assert len(history) == 5
+        assert [h["poll_date"] for h in history[-4:]] == [f"2026-11-{d:02d}" for d in range(4, 8)]
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        assert restored.state["team_history"] == history
+    asyncio.run(scenario())
+
+
+def test_replacing_open_poll_records_final_lineup_before_new_poll(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path, total=10, keepers=2)
+        await message(bot, "/teams")
+        final = deepcopy(bot.state["team_distribution"]["teams"])
+        await bot.create_poll("2026-12-01", force=True)
+        assert len(bot.state["team_history"]) == 1
+        assert bot.state["team_history"][0]["teams"] == final
+        assert bot.state["team_distribution"] is None
+    asyncio.run(scenario())
+
+
+def test_legacy_saved_lineup_is_not_shuffled_on_update_and_can_be_redrawn(tmp_path):
+    from vk_poll_bot.team_selection import partition
+
+    async def scenario():
+        bot = make_bot(tmp_path, total=15, keepers=3)
+        await message(bot, "/teams")
+        original = deepcopy(bot.state["team_distribution"])
+        bot.state["team_distribution"].pop("teams")
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert len(team_messages(bot.api)) == 1
+        assert restored.state["team_distribution"]["text"] == original["text"]
+        await message(restored, "/teams rebuild")
+        assert partition(restored.state["team_distribution"]["teams"]) != partition(
+            original["teams"])
+    asyncio.run(scenario())

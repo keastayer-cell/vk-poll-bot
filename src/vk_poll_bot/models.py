@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, TypedDict
 from uuid import uuid4
 
+from .team_selection import HISTORY_LIMIT, valid_teams
+
 
 class Voter(TypedDict):
     name: str
@@ -71,9 +73,20 @@ def normalize_state(data: Any, default_schedule: dict) -> dict:
         "rating_order": data.get("rating_order", "higher"),
         "attendance": data.get("attendance", {"players": {}, "polls": {}}),
         "team_distribution": data.get("team_distribution"),
+        "team_history": data.get("team_history", []),
     }
     if not isinstance(result["players"], dict):
         raise ValueError("players должен быть объектом")
+    history = result["team_history"]
+    if not isinstance(history, list) or any(
+        not isinstance(entry, dict) or not isinstance(entry.get("poll_id"), str)
+        or not entry["poll_id"] or not isinstance(entry.get("poll_date"), str)
+        or not valid_teams(entry.get("teams")) for entry in history
+    ):
+        raise ValueError("team_history содержит некорректные составы")
+    if len({entry["poll_id"] for entry in history}) != len(history):
+        raise ValueError("team_history содержит повторяющиеся опросы")
+    result["team_history"] = history[-HISTORY_LIMIT:]
     attendance = result["attendance"]
     if not isinstance(attendance, dict):
         raise ValueError("attendance должен быть объектом")

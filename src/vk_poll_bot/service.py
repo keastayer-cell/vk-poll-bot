@@ -12,6 +12,13 @@ from .attendance import poll_counts_for_attendance, record_closed_poll, statisti
 from .keyboards import decode_payload, poll_keyboard
 from .models import new_poll_state, normalize_state
 from .ratings import format_rating, parse_rating
+from .team_selection import (
+    HISTORY_LIMIT,
+    NoAlternative,
+    TeamSelection,
+    distribution_teams,
+    valid_teams,
+)
 from .teams import (
     add_alias,
     find_player,
@@ -136,13 +143,22 @@ class PollService:
             snapshot["rating_order"] = "lower"
         return snapshot
 
-    def render_teams(self, poll: dict) -> str:
-        return teams_text(
+    def prepare_teams(
+        self, poll: dict, previous: list[list[str]] | None = None
+    ) -> tuple[str, list[list[str]]]:
+        selection = TeamSelection(
+            history=[entry["teams"] for entry in self.state["team_history"]], previous=previous,
+        )
+        text = teams_text(
             poll, self.state["players"],
             lower_is_stronger=self.state.get("rating_order") == "lower",
+            selection=selection,
         )
+        return text, selection.teams
 
-    async def publish_teams(self, poll: dict, text: str) -> None:
+    async def publish_teams(
+        self, poll: dict, text: str, teams: list[list[str]] | None = None
+    ) -> None:
         sent = await self._send(self.settings.peer_id, text)
         poll["teams_requested"] = True
         self.state["team_distribution"] = {
@@ -150,6 +166,8 @@ class PollService:
             "message_id": sent.message_id,
             "conversation_message_id": sent.conversation_message_id, "random_id": sent.random_id,
         }
+        if teams is not None:
+            self.state["team_distribution"]["teams"] = teams
         self.save()
 
     async def refresh_teams(
@@ -167,17 +185,37 @@ class PollService:
         if not distribution:
             if rebuild and self.poll and self.poll.get("teams_requested"):
                 try:
-                    text = self.render_teams(self.poll)
+                    text, teams = self.prepare_teams(self.poll)
                 except ValueError:
                     return
                 if text.startswith("⚽ КОМАНДА"):
-                    await self.publish_teams(self.poll, text)
+                    await self.publish_teams(self.poll, text, teams)
             return
         poll = self.poll or distribution["poll"]
         if not force and not distribution.get("invalidated") and (
             self.team_snapshot(poll) == distribution["snapshot"]
         ):
             return
+        # Decide before deleting anything: a failed redraw must preserve the old lineup.
+        text, teams = "", []
+        if rebuild:
+            previous = None
+            if force:
+                previous = distribution_teams({**distribution, "invalidated": False})
+                if previous is None:
+                    await self._send(
+                        self.settings.peer_id,
+                        "⚠️ Не удалось однозначно определить прежние составы. "
+                        "Пересборка не выполнена, старое сообщение сохранено.",
+                    )
+                    return
+            try:
+                text, teams = self.prepare_teams(poll, previous)
+            except NoAlternative as error:
+                await self._send(self.settings.peer_id, str(error))
+                return
+            except ValueError as error:
+                text = str(error)
         distribution["invalidated"] = True
         distribution["reason"] = reason
         distribution["rebuild"] = rebuild
@@ -210,12 +248,8 @@ class PollService:
         self.save()
         await self._send(self.settings.peer_id, f"⚠️ {reason}\n{action}")
         if rebuild:
-            try:
-                text = self.render_teams(poll)
-            except ValueError as error:
-                text = str(error)
             if text.startswith("⚽ КОМАНДА"):
-                await self.publish_teams(poll, text)
+                await self.publish_teams(poll, text, teams)
             else:
                 await self._send(
                     self.settings.peer_id, f"Новое распределение пока невозможно. {text}"
@@ -568,6 +602,7 @@ class PollService:
     async def _archive_closed_poll(self, poll: dict) -> bool:
         if not poll_counts_for_attendance(self.state, poll):
             poll["is_open"] = False
+            self._remember_final_teams(poll)
             self.save()
             return True
         try:
@@ -582,8 +617,27 @@ class PollService:
             return False
         poll["is_open"] = False
         record_closed_poll(self.state, poll, members)
+        self._remember_final_teams(poll)
         self.save()
         return True
+
+    def _remember_final_teams(self, poll: dict) -> None:
+        distribution = self.state.get("team_distribution")
+        if not distribution or distribution.get("snapshot") != self.team_snapshot(poll):
+            return
+        teams = distribution_teams(distribution)
+        if not teams:
+            return
+        expected = {p["id"] for p in poll_players(poll, self.state["players"])
+                    if p["position"] == "field"}
+        if not valid_teams(teams, expected):
+            return
+        history = self.state["team_history"]
+        if any(entry["poll_id"] == poll["poll_id"] for entry in history):
+            return
+        history.append({"poll_id": poll["poll_id"], "poll_date": poll["poll_date"],
+                        "teams": deepcopy(teams)})
+        del history[:-HISTORY_LIMIT]
 
     async def close_poll(self) -> None:
         async with self.lock:
@@ -949,6 +1003,15 @@ class PollService:
             return
         if command == "/teams" and self.is_admin(user_id):
             async with self.lock:
+                if args and args[0].lower() == "rebuild" and (
+                    not self.poll or not self.poll.get("is_open")
+                ):
+                    await self._send(
+                        peer_id,
+                        "Опрос закрыт или активного опроса нет. "
+                        "Пересборка недоступна; опубликованные составы сохранены.",
+                    )
+                    return
                 await self._link_poll_guests()
                 if self.poll is None:
                     await self._send(peer_id, "Активного опроса нет.")
@@ -970,11 +1033,11 @@ class PollService:
                             await self.refresh_teams("Состав или рейтинги изменились.")
                         return
                     try:
-                        result = self.render_teams(self.poll)
+                        result, teams = self.prepare_teams(self.poll)
                     except ValueError as error:
                         result = str(error)
                     if result.startswith("⚽ КОМАНДА"):
-                        await self.publish_teams(self.poll, result)
+                        await self.publish_teams(self.poll, result, teams)
                     else:
                         await self._send(peer_id, result)
             return
