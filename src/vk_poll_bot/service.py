@@ -136,7 +136,7 @@ class PollService:
                     "kit_colors": "black_white_red"}
         if len(roster) == 16:
             snapshot["lineup_format"] = "full_squads"
-        elif len(roster) == 15 and sum(p["position"] == "goalkeeper" for p in roster) == 3:
+        elif len(roster) in {14, 15} and sum(p["position"] == "field" for p in roster) == 12:
             snapshot["lineup_format"] = "three_four_a_side"
         elif len(roster) == 14 and sum(p["position"] == "goalkeeper" for p in roster) == 3:
             snapshot["lineup_format"] = "insufficient_fields_for_three_teams"

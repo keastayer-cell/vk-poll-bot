@@ -86,7 +86,7 @@ def test_twelve_fields_follow_keeper_count(lower_is_stronger, manual_keeper, kee
     output = teams_text(poll, players, lower_is_stronger=lower_is_stronger)
     fields, keepers = output.split("🧤 Вратари")
     sections = fields.strip().split("⚽ КОМАНДА")[1:]
-    size = 4 if keeper_count == 3 else 6
+    size = 4 if keeper_count >= 2 else 6
     assert len(sections) == 12 // size
     for section in sections:
         assert f"{size} полевых\n" in section
@@ -208,7 +208,7 @@ def test_unresolved_player_counts(size):
     (10, 1, [5, 4]), (11, 1, [5, 5]), (12, 1, [6, 5]),
     (13, 1, [6, 6]), (14, 1, [5, 4, 4]), (15, 1, [5, 5, 4]),
     (10, 2, [4, 4]), (11, 2, [5, 4]), (12, 2, [5, 5]),
-    (13, 2, [6, 5]), (14, 2, [6, 6]), (15, 2, [5, 4, 4]),
+    (13, 2, [6, 5]), (14, 2, [4, 4, 4]), (15, 2, [5, 4, 4]),
     (11, 3, [4, 4]), (12, 3, [5, 4]), (13, 3, [5, 5]),
     (15, 3, [4, 4, 4]),
 ])
@@ -221,7 +221,7 @@ def test_squad_sizes_follow_field_count_and_show_substitutes(total, keepers, siz
                        for key, p in directory.items()}}
     output = teams_text(poll, directory)
     assert output.count("⚽ КОМАНДА") == len(sizes)
-    starters = 6 if total - keepers == 12 and keepers < 3 else 4
+    starters = 6 if total - keepers == 12 and keepers < 2 else 4
     for number, size in enumerate(sizes, 1):
         color = ("⬛ Форма: чёрная", "⬜ Форма: белая", "🟥 Форма: красная")[number - 1]
         assert (f"КОМАНДА {number} · {size} полевых\n{color}\n"

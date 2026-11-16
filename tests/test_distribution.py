@@ -491,3 +491,32 @@ def test_legacy_saved_lineup_is_not_shuffled_on_update_and_can_be_redrawn(tmp_pa
         assert partition(restored.state["team_distribution"]["teams"]) != partition(
             original["teams"])
     asyncio.run(scenario())
+
+
+
+def test_twelve_fields_two_keepers_replace_saved_sixes_with_three_fours(tmp_path):
+    async def scenario():
+        bot = make_bot(tmp_path, total=14, keepers=2)
+        fields = [key for key, p in bot.state["players"].items() if p["position"] == "field"]
+        old_teams = [fields[:6], fields[6:]]
+        await bot.publish_teams(bot.poll, "⚽ КОМАНДА 1 · 6 полевых\n⚽ КОМАНДА 2 · 6 полевых",
+                                old_teams)
+        saved = bot.state["team_distribution"]
+        saved["snapshot"].pop("lineup_format")
+        original_id = saved["message_id"]
+        bot.save()
+        restored = PollService(bot.api, bot.settings, bot.repository)
+        await restored.restore_active_poll()
+        assert bot.api.deleted == [(bot.settings.peer_id, original_id, 0)]
+        current = restored.state["team_distribution"]
+        assert list(map(len, current["teams"])) == [4, 4, 4]
+        assert sorted(key for team in current["teams"] for key in team) == sorted(fields)
+        assert current["text"].count("⚽ КОМАНДА") == 3
+        assert current["text"].count("На поле: 4 · Замены: 0") == 3
+        assert current["text"].count("🧤 │") == 2
+        assert "6 полевых" not in current["text"]
+        await restored.restore_active_poll()
+        await message(restored, "/teams")
+        assert len(team_messages(bot.api)) == 2
+        assert not restored.state["team_history"]
+    asyncio.run(scenario())

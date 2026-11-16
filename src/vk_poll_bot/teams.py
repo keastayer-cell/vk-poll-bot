@@ -295,7 +295,7 @@ def teams_text(
         return ("Нужны от 8 до 16 полевых. "
                 f"Сейчас игроков: {total}, полевых: {len(fields)}, "
                 f"вратарей: {len(keepers)}. Проверьте роли игроков.")
-    six_a_side = len(fields) == 12 and len(keepers) < 3
+    six_a_side = len(fields) == 12 and len(keepers) < 2
     starters = 6 if six_a_side else 4
     if total == 16:
         teams = balanced_with_substitutes(fields, selection=selection)
