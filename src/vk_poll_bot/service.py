@@ -7,6 +7,8 @@ from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from .api import VkApiError
 from .attendance import poll_counts_for_attendance, record_closed_poll, statistics_text
 from .config import DEFAULT_RATING_OWNER_ID
@@ -376,6 +378,27 @@ class PollService:
             message_id=message_id,
             conversation_message_id=conversation_message_id,
         )
+
+    async def repair_poll_buttons(self, reply_peer_id: int) -> None:
+        async with self.lock:
+            poll = self.poll
+            if not poll or not poll.get("is_open"):
+                result = "Открытого опроса нет. Восстанавливать кнопки не нужно."
+            elif not (poll.get("message_id") or poll.get("conversation_message_id")):
+                result = "Не найдено сообщение текущего опроса. Кнопки восстановить не удалось."
+            else:
+                try:
+                    await self._refresh_poll_message(poll)
+                except (VkApiError, httpx.HTTPError) as error:
+                    self.logger.warning(
+                        "Не удалось восстановить кнопки: %s, VK code=%s",
+                        type(error).__name__, getattr(error, "code", None),
+                    )
+                    result = "Не удалось восстановить кнопки через VK. Попробуйте /repair позже."
+                else:
+                    result = ("Кнопки текущего опроса восстановлены. "
+                              "Голоса и приглашённые сохранены.")
+        await self._send(reply_peer_id, result)
 
     async def restore_active_poll(self) -> None:
         async with self.lock:
@@ -907,6 +930,14 @@ class PollService:
         if command == "/where":
             await self._send(peer_id, f"peer_id={peer_id}\nuser_id={user_id}")
             return
+        if command == "/repair":
+            if peer_id not in {user_id, self.settings.peer_id}:
+                return
+            if not self.is_admin(user_id):
+                await self._send(peer_id, "Восстанавливать кнопки может только администратор.")
+                return
+            await self.repair_poll_buttons(peer_id)
+            return
         if user_id in self.pending_announcements and command != "/cancel":
             self.pending_announcements.remove(user_id)
             await self._send(self.settings.peer_id, text)
@@ -987,7 +1018,8 @@ class PollService:
             await self._send(
                 peer_id,
                 "Команды: /poll, /status, /close, /plus1, /minus1, /settime, /setdays, /where, "
-                "/teams (админ), /stats [число]. Рейтинги в беседе или личке: /players; "
+                "/teams (админ), /repair (админ), /stats [число]. "
+                "Рейтинги в беседе или личке: /players; "
                 "только для владельца рейтингов: /players sync, /rating, "
                 "/position, /alias",
             )
